@@ -212,8 +212,12 @@ select * from pgque.consumer_stats();
 -- Stuck consumer detection
 select * from pgque.stuck_consumers('1 hour'::interval);
 
--- OpenTelemetry-compatible metrics export
+-- OpenTelemetry-compatible metrics (scrape via sql_exporter or OTel collector)
 select * from pgque.otel_metrics();
+--  metric_name                              | metric_type | value | labels
+-- ------------------------------------------+-------------+-------+----------------------------
+--  pgque.queue.depth                        | gauge       |  1204 | {"queue": "orders"}
+--  pgque.consumer.lag_seconds               | gauge       |  3.12 | {"queue": "orders", ...}
 ```
 
 ### Recurring jobs with pg_cron
@@ -350,7 +354,7 @@ select pgque.ack(batch_id);
 | `pgque.queue_stats()` | `table` | Depth, consumer count, events/sec, DLQ count per queue |
 | `pgque.consumer_stats()` | `table` | Lag, pending events, batch status per consumer |
 | `pgque.queue_health()` | `table` | Operational diagnostics (ok / warning / critical) |
-| `pgque.otel_metrics()` | `table` | OpenTelemetry-compatible metrics export |
+| `pgque.otel_metrics()` | `table` | OTel-compatible gauges (depth, lag, DLQ, throughput) for sql_exporter / OTel collector |
 | `pgque.throughput(queue, period, bucket)` | `table` | Events per second over time |
 | `pgque.latency_percentiles(queue, consumer, period)` | `table` | p50, p95, p99 latency |
 | `pgque.error_rate(queue, period, bucket)` | `table` | Retries and dead letters over time |
@@ -443,8 +447,8 @@ Be honest about the trade-offs:
 | Sprint 5 | Client libraries: Python + Go v1 | Developer experience |
 | Sprint 6 | Testing, benchmarks, docs, CI/CD (PG 14-18) | Production-ready |
 
-**v2 (planned):** Node.js and Ruby client libraries, `peek()`, full OTel
-export architecture.
+**v2 (planned):** Node.js and Ruby client libraries, `peek()`, push-based
+OTLP exporter, trace propagation in client SDKs.
 
 ## Contributing
 
