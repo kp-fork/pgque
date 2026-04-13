@@ -735,6 +735,14 @@ else
   asm_errors=$((asm_errors + 1))
 fi
 
+# Verify pgque-api receive/ack/DLQ functions are in the script
+if grep -q 'pgque.receive\|pgque.ack\|pgque.nack' "${INSTALL_FILE}"; then
+  echo "PASS: pgque-api receive/ack/nack present in install script"
+else
+  echo "FAIL: pgque-api receive/ack/nack not found in install script"
+  asm_errors=$((asm_errors + 1))
+fi
+
 # Verify pgque-api section is present (if api files exist)
 if [[ -d "${API_DIR}" ]] && ls "${API_DIR}"/*.sql >/dev/null 2>&1; then
   if grep -q 'Section 7: pgque-api' "${INSTALL_FILE}"; then

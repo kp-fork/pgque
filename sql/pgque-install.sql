@@ -3920,6 +3920,48 @@ begin
     end if;
 end $$;
 
+-- Override set_queue_config to also accept queue_max_retries
+create or replace function pgque.set_queue_config(
+    x_queue_name    text,
+    x_param_name    text,
+    x_param_value   text)
+returns integer as $$
+declare
+    v_param_name    text;
+begin
+    -- discard NULL input
+    if x_queue_name is null or x_param_name is null then
+        raise exception 'Invalid NULL value';
+    end if;
+
+    -- check if queue exists
+    perform 1 from pgque.queue where queue_name = x_queue_name;
+    if not found then
+        raise exception 'No such event queue';
+    end if;
+
+    -- check if valid parameter name
+    v_param_name := 'queue_' || x_param_name;
+    if v_param_name not in (
+        'queue_ticker_max_count',
+        'queue_ticker_max_lag',
+        'queue_ticker_idle_period',
+        'queue_ticker_paused',
+        'queue_rotation_period',
+        'queue_external_ticker',
+        'queue_max_retries')
+    then
+        raise exception 'cannot change parameter "%s"', x_param_name;
+    end if;
+
+    execute 'update pgque.queue set '
+        || v_param_name || ' = ' || quote_literal(x_param_value)
+        || ' where queue_name = ' || quote_literal(x_queue_name);
+
+    return 1;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
 -- pgque-additions/roles.sql
 -- pgque security roles
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
@@ -4254,6 +4296,262 @@ begin
     total := total + r;
 
     return total;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque-api/dlq.sql
+-- pgque dead letter queue (DLQ) -- table + helper functions
+-- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
+--
+-- PgQ has a retry queue but no dead letter queue. pgque adds one.
+-- See SPECx.md section 4.5.
+
+-- pgque.dead_letter table
+create table if not exists pgque.dead_letter (
+    dl_id           bigserial primary key,
+    dl_queue_id     int4 not null references pgque.queue(queue_id),
+    dl_consumer_id  int4 not null references pgque.consumer(co_id),
+    dl_time         timestamptz not null default now(),
+    dl_reason       text,
+
+    -- Original event fields (copied from event at time of death)
+    ev_id           bigint not null,
+    ev_time         timestamptz not null,
+    ev_txid         xid8,
+    ev_retry        int4,
+    ev_type         text,
+    ev_data         text,
+    ev_extra1       text,
+    ev_extra2       text,
+    ev_extra3       text,
+    ev_extra4       text
+);
+
+create index if not exists dl_queue_time_idx
+    on pgque.dead_letter (dl_queue_id, dl_time);
+
+-- pgque.event_dead() -- move event to DLQ (called by nack() when max retries exceeded)
+create or replace function pgque.event_dead(
+    i_batch_id bigint,
+    i_event_id bigint,
+    i_reason text,
+    i_ev_time timestamptz,
+    i_ev_txid xid8,
+    i_ev_retry int4,
+    i_ev_type text,
+    i_ev_data text,
+    i_ev_extra1 text default null,
+    i_ev_extra2 text default null,
+    i_ev_extra3 text default null,
+    i_ev_extra4 text default null)
+returns integer as $$
+declare
+    v_sub record;
+begin
+    -- Look up subscription from batch
+    select sub_queue, sub_consumer into v_sub
+    from pgque.subscription where sub_batch = i_batch_id;
+    if not found then
+        raise exception 'batch not found: %', i_batch_id;
+    end if;
+
+    -- Insert into dead letter table (no re-query of batch events)
+    insert into pgque.dead_letter (
+        dl_queue_id, dl_consumer_id, dl_reason,
+        ev_id, ev_time, ev_txid, ev_retry, ev_type, ev_data,
+        ev_extra1, ev_extra2, ev_extra3, ev_extra4)
+    values (
+        v_sub.sub_queue, v_sub.sub_consumer, i_reason,
+        i_event_id, i_ev_time, i_ev_txid, i_ev_retry, i_ev_type, i_ev_data,
+        i_ev_extra1, i_ev_extra2, i_ev_extra3, i_ev_extra4);
+
+    return 1;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.dlq_inspect() -- inspect DLQ entries for a queue
+create or replace function pgque.dlq_inspect(
+    i_queue_name text, i_limit_count int default 100)
+returns setof pgque.dead_letter as $$
+begin
+    return query
+    select dl.*
+    from pgque.dead_letter dl
+    join pgque.queue q on q.queue_id = dl.dl_queue_id
+    where q.queue_name = i_queue_name
+    order by dl.dl_time desc
+    limit i_limit_count;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.dlq_replay() -- replay a single dead letter event back into the queue
+create or replace function pgque.dlq_replay(i_dead_letter_id bigint)
+returns bigint as $$
+declare
+    v_dl record;
+    v_queue_name text;
+    v_new_eid bigint;
+begin
+    select dl.*, q.queue_name into v_dl
+    from pgque.dead_letter dl
+    join pgque.queue q on q.queue_id = dl.dl_queue_id
+    where dl.dl_id = i_dead_letter_id;
+
+    if not found then
+        raise exception 'dead letter entry not found: %', i_dead_letter_id;
+    end if;
+
+    -- Re-insert into the queue
+    v_new_eid := pgque.insert_event(v_dl.queue_name, v_dl.ev_type, v_dl.ev_data,
+        v_dl.ev_extra1, v_dl.ev_extra2, v_dl.ev_extra3, v_dl.ev_extra4);
+
+    -- Remove from DLQ
+    delete from pgque.dead_letter where dl_id = i_dead_letter_id;
+
+    return v_new_eid;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.dlq_replay_all() -- replay all DLQ events for a queue
+create or replace function pgque.dlq_replay_all(i_queue_name text)
+returns integer as $$
+declare
+    v_dl record;
+    v_cnt integer := 0;
+begin
+    for v_dl in
+        select dl.dl_id, dl.ev_type, dl.ev_data,
+               dl.ev_extra1, dl.ev_extra2, dl.ev_extra3, dl.ev_extra4,
+               q.queue_name
+        from pgque.dead_letter dl
+        join pgque.queue q on q.queue_id = dl.dl_queue_id
+        where q.queue_name = i_queue_name
+    loop
+        perform pgque.insert_event(v_dl.queue_name, v_dl.ev_type, v_dl.ev_data,
+            v_dl.ev_extra1, v_dl.ev_extra2, v_dl.ev_extra3, v_dl.ev_extra4);
+        delete from pgque.dead_letter where dl_id = v_dl.dl_id;
+        v_cnt := v_cnt + 1;
+    end loop;
+
+    return v_cnt;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.dlq_purge() -- purge old DLQ entries
+create or replace function pgque.dlq_purge(
+    i_queue_name text, i_older_than interval default '30 days')
+returns integer as $$
+declare
+    v_cnt integer;
+begin
+    delete from pgque.dead_letter
+    where dl_queue_id = (select queue_id from pgque.queue where queue_name = i_queue_name)
+      and dl_time < now() - i_older_than;
+    get diagnostics v_cnt = row_count;
+    return v_cnt;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque-api/receive.sql
+-- pgque.receive(), pgque.ack(), pgque.nack() -- modern consume API
+-- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
+-- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
+--
+-- These functions wrap PgQ primitives (next_batch, get_batch_events,
+-- finish_batch, event_retry) into a simpler receive/ack/nack interface.
+-- See SPECx.md sections 4.2 and 4.3.
+
+-- pgque.message type (idempotent creation)
+do $$ begin
+    create type pgque.message as (
+        msg_id      bigint,
+        batch_id    bigint,
+        type        text,
+        payload     text,
+        retry_count int4,
+        created_at  timestamptz,
+        extra1      text,
+        extra2      text,
+        extra3      text,
+        extra4      text
+    );
+exception when duplicate_object then null;
+end $$;
+
+-- pgque.receive() -- wraps next_batch + get_batch_events
+create or replace function pgque.receive(
+    i_queue text, i_consumer text, i_max_return int default 100)
+returns setof pgque.message as $$
+declare
+    v_batch_id bigint;
+    ev record;
+    cnt int := 0;
+begin
+    -- Get next batch (may return NULL if no events)
+    v_batch_id := pgque.next_batch(i_queue, i_consumer);
+    if v_batch_id is null then
+        return;
+    end if;
+
+    -- Yield messages from the batch
+    for ev in
+        select ev_id, ev_type, ev_data, ev_retry, ev_time,
+               ev_extra1, ev_extra2, ev_extra3, ev_extra4
+        from pgque.get_batch_events(v_batch_id)
+    loop
+        return next row(
+            ev.ev_id, v_batch_id, ev.ev_type, ev.ev_data,
+            ev.ev_retry, ev.ev_time,
+            ev.ev_extra1, ev.ev_extra2, ev.ev_extra3, ev.ev_extra4
+        )::pgque.message;
+        cnt := cnt + 1;
+        exit when cnt >= i_max_return;
+    end loop;
+    return;
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.ack() -- finishes the batch, advances consumer position
+create or replace function pgque.ack(i_batch_id bigint)
+returns integer as $$
+begin
+    return pgque.finish_batch(i_batch_id);
+end;
+$$ language plpgsql security definer set search_path = pgque, pg_catalog;
+
+-- pgque.nack() -- retry or route to DLQ based on retry_count vs max_retries
+create or replace function pgque.nack(
+    i_batch_id bigint,
+    i_msg pgque.message,
+    i_retry_after interval default '60 seconds',
+    i_reason text default null)
+returns integer as $$
+declare
+    v_max_retries int4;
+begin
+    -- Single lookup: subscription -> queue config
+    select coalesce(q.queue_max_retries, 5) into v_max_retries
+    from pgque.subscription s
+    join pgque.queue q on q.queue_id = s.sub_queue
+    where s.sub_batch = i_batch_id;
+
+    if not found then
+        raise exception 'batch not found: %', i_batch_id;
+    end if;
+
+    if coalesce(i_msg.retry_count, 0) >= v_max_retries then
+        -- Move to dead letter queue (pass event fields, no re-query)
+        perform pgque.event_dead(i_batch_id, i_msg.msg_id,
+            coalesce(i_reason, 'max retries exceeded'),
+            i_msg.created_at, null::xid8, i_msg.retry_count,
+            i_msg.type, i_msg.payload,
+            i_msg.extra1, i_msg.extra2, i_msg.extra3, i_msg.extra4);
+    else
+        -- Retry after delay
+        perform pgque.event_retry(i_batch_id, i_msg.msg_id,
+            extract(epoch from i_retry_after)::integer);
+    end if;
+    return 1;
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 
