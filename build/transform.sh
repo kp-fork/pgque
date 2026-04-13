@@ -413,3 +413,279 @@ else
   echo "=== ${errors} CHECK(S) FAILED ==="
   exit 1
 fi
+
+# -- Post-transform patch: LISTEN/NOTIFY in ticker ----------------------------
+
+echo ""
+echo "=== Applying post-transform patches ==="
+
+TICKER_FILE="${OUTPUT_DIR}/functions/pgque.ticker.sql"
+
+# Patch the 4-arg external ticker: inject pg_notify before "return i_tick_id;"
+sed -i '/^    return i_tick_id;$/i\
+\
+    -- pgque: notify listeners after tick\
+    perform pg_notify('"'"'pgque_'"'"' || i_queue_name, i_tick_id::text);' \
+  "${TICKER_FILE}"
+
+# Patch the 1-arg internal ticker: inject pg_notify before "return currval(...)"
+sed -i '/^    return currval(q\.queue_tick_seq);$/i\
+\
+    -- pgque: notify listeners after tick\
+    perform pg_notify('"'"'pgque_'"'"' || i_queue_name, currval(q.queue_tick_seq)::text);' \
+  "${TICKER_FILE}"
+
+echo "PASS: pg_notify injected into ticker function"
+
+# -- Assembly: build sql/pgque-install.sql ------------------------------------
+
+echo ""
+echo "=== Assembling sql/pgque-install.sql ==="
+
+SQL_DIR="${REPO_ROOT}/sql"
+INSTALL_FILE="${SQL_DIR}/pgque-install.sql"
+ADDITIONS_DIR="${SQL_DIR}/pgque-additions"
+
+apply_idempotency_guards() {
+  # Make DDL statements idempotent:
+  # - CREATE TABLE -> CREATE TABLE IF NOT EXISTS
+  # - CREATE SEQUENCE -> CREATE SEQUENCE IF NOT EXISTS
+  # - CREATE INDEX -> CREATE INDEX IF NOT EXISTS
+  # Functions already use CREATE OR REPLACE FUNCTION (verified above).
+  # No CREATE TYPE statements exist in the transformed output.
+  local content="$1"
+
+  # CREATE TABLE (but not "CREATE TABLE IF NOT EXISTS" which already exists)
+  content=$(echo "$content" | sed -E \
+    's/^([[:space:]]*)create table ([^(])/\1create table if not exists \2/I' \
+    | sed -E 's/if not exists if not exists/if not exists/gI')
+
+  # CREATE SEQUENCE
+  content=$(echo "$content" | sed -E \
+    's/^([[:space:]]*)create sequence /\1create sequence if not exists /I' \
+    | sed -E 's/if not exists if not exists/if not exists/gI')
+
+  # CREATE INDEX
+  content=$(echo "$content" | sed -E \
+    's/^([[:space:]]*)create index /\1create index if not exists /I' \
+    | sed -E 's/if not exists if not exists/if not exists/gI')
+
+  echo "$content"
+}
+
+# Start with header
+cat > "${INSTALL_FILE}" << 'HEADER'
+-- pgque-install.sql -- PgQ Universal Edition
+-- Version: 1.0.0-dev
+-- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
+-- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
+--
+-- Install: \i pgque-install.sql
+-- Start:   SELECT pgque.start();
+-- Usage:   See https://github.com/NikolayS/pgque
+
+HEADER
+
+# Schema creation
+echo "create schema if not exists pgque;" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+# Section 1: Tables
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 1: Tables" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+tables_content=$(cat "${OUTPUT_DIR}/structure/tables.sql")
+# Remove the original "create schema pgque;" line (we already have IF NOT EXISTS above)
+tables_content=$(echo "$tables_content" | sed '/^create schema pgque;$/d')
+# Remove "set client_min_messages" — install script should not change session settings
+tables_content=$(echo "$tables_content" | sed "/^set client_min_messages/d")
+# Remove commented-out "drop schema" line
+tables_content=$(echo "$tables_content" | sed '/^-- drop schema if exists/d')
+tables_content=$(apply_idempotency_guards "$tables_content")
+echo "$tables_content" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+# Section 2: Internal functions (in correct order from SOURCE_FILES)
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 2: Internal functions" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+FUNCTION_FILES=(
+  pgque.upgrade_schema.sql
+  pgque.batch_event_sql.sql
+  pgque.batch_event_tables.sql
+  pgque.event_retry_raw.sql
+  pgque.find_tick_helper.sql
+  pgque.ticker.sql
+  pgque.maint_retry_events.sql
+  pgque.maint_rotate_tables.sql
+  pgque.maint_tables_to_vacuum.sql
+  pgque.maint_operations.sql
+  pgque.grant_perms.sql
+  pgque.tune_storage.sql
+  pgque.force_tick.sql
+  pgque.seq_funcs.sql
+  pgque.quote_fqname.sql
+  pgque.create_queue.sql
+  pgque.drop_queue.sql
+  pgque.set_queue_config.sql
+  pgque.insert_event.sql
+  pgque.current_event_table.sql
+  pgque.register_consumer.sql
+  pgque.unregister_consumer.sql
+  pgque.next_batch.sql
+  pgque.get_batch_events.sql
+  pgque.get_batch_cursor.sql
+  pgque.event_retry.sql
+  pgque.batch_retry.sql
+  pgque.finish_batch.sql
+  pgque.get_queue_info.sql
+  pgque.get_consumer_info.sql
+  pgque.version.sql
+  pgque.get_batch_info.sql
+)
+
+for func_file in "${FUNCTION_FILES[@]}"; do
+  func_path="${OUTPUT_DIR}/functions/${func_file}"
+  if [[ -f "${func_path}" ]]; then
+    cat "${func_path}" >> "${INSTALL_FILE}"
+    echo "" >> "${INSTALL_FILE}"
+  else
+    echo "WARNING: function file not found: ${func_file}" >&2
+  fi
+done
+
+# Section 3: PL/pgSQL event insertion
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 3: PL/pgSQL event insertion" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+cat "${OUTPUT_DIR}/lowlevel_pl/insert_event.sql" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+# Section 4: Trigger functions
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 4: Trigger functions" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+for triga_file in jsontriga.sql logutriga.sql sqltriga.sql; do
+  cat "${OUTPUT_DIR}/lowlevel_pl/${triga_file}" >> "${INSTALL_FILE}"
+  echo "" >> "${INSTALL_FILE}"
+done
+
+# Section 5: Default grants (from PgQ)
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 5: Default grants" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+cat "${OUTPUT_DIR}/structure/grants.sql" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+# Section 6: pgque additions
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "-- Section 6: pgque additions" >> "${INSTALL_FILE}"
+echo "-- ======================================================================" >> "${INSTALL_FILE}"
+echo "" >> "${INSTALL_FILE}"
+
+for addition_file in config.sql queue_max_retries.sql roles.sql lifecycle.sql; do
+  echo "-- pgque-additions/${addition_file}" >> "${INSTALL_FILE}"
+  cat "${ADDITIONS_DIR}/${addition_file}" >> "${INSTALL_FILE}"
+  echo "" >> "${INSTALL_FILE}"
+done
+
+install_lines=$(wc -l < "${INSTALL_FILE}")
+echo "Assembled ${INSTALL_FILE} (${install_lines} lines)"
+
+# -- Assembly verification ----------------------------------------------------
+
+echo ""
+echo "=== Assembly verification ==="
+
+asm_errors=0
+
+# Verify header is present
+if head -1 "${INSTALL_FILE}" | grep -q 'pgque-install.sql'; then
+  echo "PASS: Install script header present"
+else
+  echo "FAIL: Install script header missing"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify schema creation with IF NOT EXISTS
+if grep -q 'create schema if not exists pgque;' "${INSTALL_FILE}"; then
+  echo "PASS: Schema creation is idempotent"
+else
+  echo "FAIL: Missing idempotent schema creation"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify no bare "create table" without "if not exists"
+bare_create_table=$(grep -n 'create table ' "${INSTALL_FILE}" \
+  | grep -iv 'if not exists' \
+  | grep -v '^[0-9]*:[[:space:]]*--' \
+  || true)
+if [[ -z "${bare_create_table}" ]]; then
+  echo "PASS: All CREATE TABLE statements are idempotent"
+else
+  echo "FAIL: Found bare CREATE TABLE without IF NOT EXISTS:"
+  echo "${bare_create_table}"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify no bare "create sequence" without "if not exists"
+bare_create_seq=$(grep -n 'create sequence ' "${INSTALL_FILE}" \
+  | grep -iv 'if not exists' \
+  | grep -v '^[0-9]*:[[:space:]]*--' \
+  || true)
+if [[ -z "${bare_create_seq}" ]]; then
+  echo "PASS: All CREATE SEQUENCE statements are idempotent"
+else
+  echo "FAIL: Found bare CREATE SEQUENCE without IF NOT EXISTS:"
+  echo "${bare_create_seq}"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify no bare "create index" without "if not exists"
+# Exclude dynamic SQL (execute '...') inside function bodies
+bare_create_idx=$(grep -n 'create index ' "${INSTALL_FILE}" \
+  | grep -iv 'if not exists' \
+  | grep -v '^[0-9]*:[[:space:]]*--' \
+  | grep -v 'execute' \
+  || true)
+if [[ -z "${bare_create_idx}" ]]; then
+  echo "PASS: All CREATE INDEX statements are idempotent"
+else
+  echo "FAIL: Found bare CREATE INDEX without IF NOT EXISTS:"
+  echo "${bare_create_idx}"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify pg_notify is in the ticker section
+if grep -q 'pg_notify' "${INSTALL_FILE}"; then
+  echo "PASS: pg_notify present in install script"
+else
+  echo "FAIL: pg_notify missing from install script"
+  asm_errors=$((asm_errors + 1))
+fi
+
+# Verify pgque additions are at the end
+if tail -20 "${INSTALL_FILE}" | grep -q 'lifecycle.sql\|pgque.version\|pgque.start\|pgque.stop'; then
+  echo "PASS: pgque additions are at the end of the script"
+else
+  echo "FAIL: pgque additions not found at end of script"
+  asm_errors=$((asm_errors + 1))
+fi
+
+echo ""
+if [[ ${asm_errors} -eq 0 ]]; then
+  echo "=== ASSEMBLY COMPLETE — ALL CHECKS PASSED ==="
+else
+  echo "=== ASSEMBLY: ${asm_errors} CHECK(S) FAILED ==="
+  exit 1
+fi
