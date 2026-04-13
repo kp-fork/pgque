@@ -1,9 +1,9 @@
 # PgQue -- PgQ Universal Edition
 
-- **Version:** 0.4.0-draft
+- **Version:** 0.5.0-draft
 - **Date:** 2026-04-12
 - **License:** Apache-2.0
-- **Status:** Second review round addressed (3 reviewers)
+- **Status:** Implementation-ready (3 reviewers approved)
 - **Companion:** SPEC.md (v0.7.0-draft) contains the deep architectural analysis of PgQ internals -- rotation mechanics, snapshot isolation, batch_event_sql algorithm, dual-filter optimization, INHERITS justification, rotation state machine, subtransaction caveats, tick cleanup invariants. This document references SPEC.md for those topics rather than duplicating them.
 
 **Two-layer architecture:** pgque is explicitly structured as two layers:
@@ -17,7 +17,8 @@
 | 0.1.0-draft | 2026-04-12 | Initial draft: repackaging thesis, what changes from PgQ, modern API layer, observability, client libraries, advanced patterns, implementation phases, source file inventory. |
 | 0.2.0-draft | 2026-04-12 | Landscape comparison (28 systems across PG-native, external brokers, workflow engines, Python task queues; architectural comparison table; positioning rationale). Team/staffing with week-by-week Gantt. Risk table (11 risks). Best practices. Sprint-level implementation plan with deliverables and test plans. |
 | 0.3.0-draft | 2026-04-12 | First review round. Rename pgqx to pgque (PgQ Universal Edition). Explicit two-layer architecture (pgque-core vs pgque-api). Fix receive() batch ownership trap (rename i_batch_size to i_max_return, document that ack processes entire batch). Fix nack() to accept retry_count parameter (avoid re-querying batch). Fix send_batch() to resolve queue/table once. Fix OTel counter/gauge semantics. Fix queue_health() edge cases. Soften "Exactly-once capable" to "Exactly-once capable (transactional pattern)". Resolve priority contradiction. Add VACUUM for delayed_events and dead_letter to maint(). Defer full OTel export architecture and Node/Ruby SDKs to v2. Align Sprint 5 with risk mitigation (Python + Go only). Document receive() rotation-blocking behavior. |
-| 0.4.0-draft | 2026-04-12 | Second review round (3 reviewers). Add preliminary benchmark results (section 2.9, from NikolayS/pgq#1 -- quick-and-dirty laptop benchmark, needs repetition on server hardware). Update throughput claim from ~10-20k to ~86k ev/s (PL/pgSQL measured). Add PgQ code import strategy: git submodule + build/transform.sh (section 8.0). Fix `event_dead()` to accept event fields from caller instead of re-querying batch. Remove dead `qstate` lookup from `send_batch()`, leave TODO. Read `max_retries` from queue config instead of hardcoding 5 in `nack()`. Drop `peek()` from v1 scope. Fix `delayed_events` index (remove broken partial-index predicate with `now()`). Rename `send_at()` return type documentation to clarify it returns a scheduled-entry ID, not a queue event ID. Fix Node.js/Ruby class names (PgqueClient -> PgqueClient, Pgque:: -> Pgque::). Fix CLI env var (PGQUE_DSN -> PGQUE_DSN). Align Gantt with v1 scope (remove Node.js/Ruby from weeks 7-8). Add `queue_max_retries` column to `pgque.queue` table. Fix `queue_health()` to handle queues with no ticks. |
+| 0.4.0-draft | 2026-04-12 | Second review round (3 reviewers). Add preliminary benchmark results (section 2.9, from NikolayS/pgq#1 -- quick-and-dirty laptop benchmark, needs repetition on server hardware). Update throughput claim from ~10-20k to ~86k ev/s (PL/pgSQL measured). Add PgQ code import strategy: git submodule + build/transform.sh (section 8.0). Fix `event_dead()` to accept event fields from caller instead of re-querying batch. Remove dead `qstate` lookup from `send_batch()`, leave TODO. Read `max_retries` from queue config instead of hardcoding 5 in `nack()`. Drop `peek()` from v1 scope. Fix `delayed_events` index (remove broken partial-index predicate with `now()`). Rename `send_at()` return type documentation to clarify it returns a scheduled-entry ID, not a queue event ID. Fix Node.js/Ruby class names (PgqxClient -> PgqueClient, Pgqx:: -> Pgque::). Fix CLI env var (PGQX_DSN -> PGQUE_DSN). Align Gantt with v1 scope (remove Node.js/Ruby from weeks 7-8). Add `queue_max_retries` column to `pgque.queue` table. Fix `queue_health()` to handle queues with no ticks. |
+| 0.5.0-draft | 2026-04-12 | Third review round (3 approvals). Fix section 2.7 throughput claim (was still ~10-20k, now reflects benchmarks with `synchronous_commit=off` caveat). Add `sync_commit=off` caveat to section 2.5 comparison table. Combine `nack()` two lookups into single join. Add `queue_max_retries` column to schema definition (section 3.4.6.1). Document `ev_txid` NULL in DLQ (pgque.message does not carry txid). Correct RedPanda comparison units (MiB/s not Mbps). |
 
 ---
 
@@ -177,7 +178,7 @@ systems across the features that matter for production operations.
 | Language-agnostic | Yes (SQL API) | Yes (SQL API) | Go only | Node.js only | Node.js only | Elixir only | Ruby only |
 | Managed PG compatible | Yes | Depends (needs ext) | Yes | Yes | Yes | Yes | Yes |
 | Latency (typical) | 1-2s (tick interval) | Sub-100ms | Sub-100ms | Sub-3ms | ~1s | ~1s | ~1s |
-| Throughput | ~86k ev/s single-TX, ~164k batched (PL/pgSQL; see 2.9) | ~30k msg/sec read | ~46k jobs/sec | ~184k jobs/sec | ~10k jobs/sec | ~20k jobs/sec | Not published |
+| Throughput | ~86k ev/s single-TX, ~164k batched (PL/pgSQL, `sync_commit=off` per-session; see 2.9) | ~30k msg/sec read | ~46k jobs/sec | ~184k jobs/sec | ~10k jobs/sec | ~20k jobs/sec | Not published |
 | Battle-tested | 15+ years (Skype/MS) | ~2 years | ~2 years | ~5 years | ~5 years | ~5 years | ~1 year |
 
 **Reading the throughput column:** These numbers come from different benchmarks
@@ -236,9 +237,13 @@ trade-offs:
   wakeup). If you need sub-10ms job dispatch, graphile-worker or direct
   LISTEN/NOTIFY is a better fit.
 
-- **100k+ jobs/sec sustained throughput.** pgque's PL/pgSQL execution layer
-  caps throughput at ~10-20k events/sec. If you need 100k+ jobs/sec, you
-  need a dedicated broker (Kafka, Redis Streams) or a C-level extension.
+- **100k+ jobs/sec sustained throughput.** Preliminary benchmarks
+  (section 2.9) show ~86k ev/s with `synchronous_commit=off` (settable
+  per-session or per-transaction — safe for queue workloads even when the
+  global setting is `on`, since at worst the last few ms of committed events
+  are lost on crash). With `synchronous_commit=on`, expect lower numbers.
+  If you need 100k+ jobs/sec sustained, you likely need a dedicated broker
+  (Kafka, RedPanda) or a C-level extension.
 
 - **Complex multi-step workflows with branching.** If your workload is
   "step A then step B, but if B fails retry B three times, then escalate to
@@ -279,8 +284,9 @@ will need to be repeated on proper server hardware with controlled
 conditions.** Full details, methodology, and raw data:
 [NikolayS/pgq#1](https://github.com/NikolayS/pgq/issues/1).
 
-Key findings (PgQ v3.5.1, tuned config: `synchronous_commit=off`,
-`shared_buffers=4GB`, `max_wal_size=8GB`, `wal_level=minimal`):
+Key findings (PgQ v3.5.1, tuned config: `synchronous_commit=off` — can be
+set per-session/per-TX for queue workloads only; `shared_buffers=4GB`,
+`max_wal_size=8GB`, `wal_level=minimal`):
 
 | Scenario | Throughput | Per core |
 |---|---|---|
@@ -517,6 +523,20 @@ PgQ's `queue_per_tx_limit` uses C-level per-transaction state tracking via
 The feature is rarely used. pgque drops it.
 
 The `queue_per_tx_limit` column is removed from `pgque.queue`.
+
+#### 3.4.6.1 Add `queue_max_retries` column
+
+pgque adds a `queue_max_retries` column to `pgque.queue`:
+
+```sql
+alter table pgque.queue add column queue_max_retries int4;
+-- NULL means use default (5). Set via create_queue() JSONB options
+-- or set_queue_config().
+```
+
+The `create_queue()` JSONB overload maps `"max_retries"` to this column.
+`nack()` reads `queue_max_retries` to decide retry vs. DLQ routing
+(see section 4.3).
 
 #### 3.4.7 Drop `set default_with_oids = 'off'`
 
@@ -791,13 +811,12 @@ create function pgque.nack(
 returns integer as $$
 declare
     v_max_retries int4;
-    v_queue_id int4;
 begin
-    -- Look up queue's max_retries from queue config
-    select s.sub_queue into v_queue_id
-    from pgque.subscription where sub_batch = i_batch_id;
+    -- Single lookup: subscription -> queue config
     select coalesce(q.queue_max_retries, 5) into v_max_retries
-    from pgque.queue q where q.queue_id = v_queue_id;
+    from pgque.subscription s
+    join pgque.queue q on q.queue_id = s.sub_queue
+    where s.sub_batch = i_batch_id;
 
     if coalesce(i_msg.retry_count, 0) >= v_max_retries then
         -- Move to dead letter queue (pass event fields, no re-query)
@@ -862,7 +881,8 @@ CREATE TABLE pgque.dead_letter (
     -- Original event fields (copied from event at time of death)
     ev_id           bigint NOT NULL,
     ev_time         timestamptz NOT NULL,
-    ev_txid         xid8,
+    ev_txid         xid8,       -- NULL: pgque.message does not carry txid
+                                -- (internal detail, meaningless after batch closes)
     ev_retry        int4,
     ev_type         text,
     ev_data         text,
