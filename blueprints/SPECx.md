@@ -1856,14 +1856,14 @@ dependency and apply transformations mechanically during the build step.
 
 ```
 pgque/
-  vendor/pgq/          -- git submodule pointing to github.com/pgq/pgq
+  pgq/                 -- git submodule pointing to github.com/pgq/pgq
   sql/
-    pgque-install.sql   -- built from vendor/pgq sources + pgque additions
+    pgque-install.sql   -- built from pgq/ sources + pgque additions
   build/
     transform.sh        -- mechanical rename + modernization script
 ```
 
-The `vendor/pgq/` submodule pins to a specific PgQ release tag (v3.5.1).
+The `pgq/` submodule pins to a specific PgQ release tag (v3.5.1).
 The build script (`transform.sh`) reads PgQ's PL-only source files, applies
 the mechanical transformations (schema rename, `txid_*` -> `pg_*`, `xid8`,
 `search_path` pinning, cleanup), and concatenates the result with pgque's
@@ -1888,7 +1888,7 @@ keeps the upstream relationship clean.
 **Nature:** Mechanical transformation. No new logic.
 
 **Deliverables:**
-1. Set up PgQ as a git submodule (`vendor/pgq/`, pinned to v3.5.1)
+1. Set up PgQ as a git submodule (`pgq/`, pinned to v3.5.1)
 2. Create `build/transform.sh` that reads PL-only source files and applies
    all mechanical transformations (items 3-9 below)
 3. Global rename: `pgq.` -> `pgque.` (schema prefix in ~40 files)

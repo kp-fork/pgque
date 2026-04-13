@@ -75,7 +75,7 @@ set -Eeuo pipefail
 
 ```
 pgque/
-  vendor/pgq/          -- git submodule (github.com/pgq/pgq, pinned tag)
+  pgq/                 -- git submodule (github.com/pgq/pgq, pinned tag)
   build/
     transform.sh       -- mechanical rename + modernization script
   blueprints/          -- specs, design docs, brainstorms
