@@ -366,9 +366,9 @@ begin
             batch.tx_start := rec.id1;
         else
             if arr = '' then
-                arr := rec.id1::text;
+                arr := '''' || rec.id1::text || '''::xid8';
             else
-                arr := arr || ',' || rec.id1::text;
+                arr := arr || ',''' || rec.id1::text || '''::xid8';
             end if;
         end if;
     end loop;
@@ -392,8 +392,8 @@ begin
             || ' and cur.tick_queue = ' || batch.sub_queue::text
             || ' and last.tick_id = ' || batch.sub_last_tick::text
             || ' and last.tick_queue = ' || batch.sub_queue::text
-            || ' and ev.ev_txid >= ' || batch.tx_start::text
-            || ' and ev.ev_txid <= ' || batch.tx_end::text
+            || ' and ev.ev_txid >= ''' || batch.tx_start::text || '''::xid8'
+            || ' and ev.ev_txid <= ''' || batch.tx_end::text || '''::xid8'
             || ' and pg_visible_in_snapshot(ev.ev_txid, cur.tick_snapshot)'
             || ' and not pg_visible_in_snapshot(ev.ev_txid, last.tick_snapshot)'
             || retry_expr;
