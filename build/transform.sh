@@ -447,6 +447,25 @@ sed -i 's/ -- unsure about access//' "${OUTPUT_DIR}/functions/pgque.ticker.sql"
 
 echo "PASS: debug comments removed from ticker"
 
+# Fix xid8 comparisons in batch_event_sql dynamic SQL.
+# After the bigint->xid8 transform, ev_txid is xid8 but the dynamic SQL
+# builds comparisons like "ev.ev_txid >= 12345" where 12345 is a plain
+# integer literal. PostgreSQL has no >= operator for (xid8, integer).
+# Fix: wrap values in single-quote text literals with ::xid8 cast,
+# e.g. ev.ev_txid >= '12345'::xid8
+BATCH_SQL_FILE="${OUTPUT_DIR}/functions/pgque.batch_event_sql.sql"
+sed -i "s/|| ' and ev.ev_txid >= ' || batch.tx_start::text/|| ' and ev.ev_txid >= ''' || batch.tx_start::text || '''::xid8'/" \
+  "${BATCH_SQL_FILE}"
+sed -i "s/|| ' and ev.ev_txid <= ' || batch.tx_end::text/|| ' and ev.ev_txid <= ''' || batch.tx_end::text || '''::xid8'/" \
+  "${BATCH_SQL_FILE}"
+# Also fix the IN() list for older tx-es: each value needs ::xid8 cast.
+sed -i "s/arr := rec.id1::text;/arr := '''' || rec.id1::text || '''::xid8';/" \
+  "${BATCH_SQL_FILE}"
+sed -i "s/arr := arr || ',' || rec.id1::text;/arr := arr || ',''' || rec.id1::text || '''::xid8';/" \
+  "${BATCH_SQL_FILE}"
+
+echo "PASS: xid8 casts added to batch_event_sql dynamic SQL"
+
 # -- Assembly: build sql/pgque-install.sql ------------------------------------
 
 echo ""
