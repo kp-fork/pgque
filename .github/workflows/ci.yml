@@ -46,6 +46,11 @@ jobs:
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
             -f tests/run_all.sql
 
+      - name: Run acceptance tests
+        run: |
+          PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
+            -f tests/acceptance/run_acceptance.sql
+
       - name: Test install idempotency
         run: |
           # Re-run install -- should produce no errors
