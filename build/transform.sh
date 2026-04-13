@@ -621,7 +621,7 @@ echo "-- Section 6: pgque additions" >> "${INSTALL_FILE}"
 echo "-- ======================================================================" >> "${INSTALL_FILE}"
 echo "" >> "${INSTALL_FILE}"
 
-for addition_file in config.sql queue_max_retries.sql roles.sql lifecycle.sql; do
+for addition_file in config.sql queue_max_retries.sql lifecycle.sql roles.sql; do
   echo "-- pgque-additions/${addition_file}" >> "${INSTALL_FILE}"
   cat "${ADDITIONS_DIR}/${addition_file}" >> "${INSTALL_FILE}"
   echo "" >> "${INSTALL_FILE}"

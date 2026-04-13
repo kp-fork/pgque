@@ -31,7 +31,7 @@ jobs:
           for i in $(seq 1 30); do
             docker exec pgque-test pg_isready -U postgres && break
             sleep 1
-          done
+          done || { echo "PG not ready after 30 seconds"; exit 1; }
 
       - name: Build pgque
         run: bash build/transform.sh
@@ -39,34 +39,34 @@ jobs:
       - name: Install pgque
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f sql/pgque-install.sql
+            -v ON_ERROR_STOP=1 -f sql/pgque-install.sql
 
       - name: Run regression tests
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f tests/run_all.sql
+            -v ON_ERROR_STOP=1 -f tests/run_all.sql
 
       - name: Run acceptance tests
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f tests/acceptance/run_acceptance.sql
+            -v ON_ERROR_STOP=1 -f tests/acceptance/run_acceptance.sql
 
       - name: Test install idempotency
         run: |
           # Re-run install -- should produce no errors
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f sql/pgque-install.sql
+            -v ON_ERROR_STOP=1 -f sql/pgque-install.sql
           # Verify everything still works
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f tests/test_install_idempotency.sql
+            -v ON_ERROR_STOP=1 -f tests/test_install_idempotency.sql
 
       - name: Test uninstall
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -f sql/pgque-uninstall.sql
+            -v ON_ERROR_STOP=1 -f sql/pgque-uninstall.sql
           # Verify schema is gone
           result=$(PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -tAc "select count(*) from pg_namespace where nspname = 'pgque'")
+            -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_namespace where nspname = 'pgque'")
           if [ "$result" != "0" ]; then
             echo "FAIL: pgque schema still exists after uninstall"
             exit 1
