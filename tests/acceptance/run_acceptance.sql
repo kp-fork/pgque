@@ -10,9 +10,6 @@
 \echo 'Running: US-5 Batch processing under load'
 \i tests/acceptance/us5_batch_load.sql
 \echo ''
-\echo 'Running: US-6 Graceful rotation under consumer lag'
-\i tests/acceptance/us6_rotation_lag.sql
-\echo ''
 \echo 'Running: US-7 Transactional exactly-once'
 \i tests/acceptance/us7_exactly_once.sql
 \echo ''

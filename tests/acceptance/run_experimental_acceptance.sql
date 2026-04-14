@@ -7,6 +7,9 @@
 \echo 'Running: US-4 Delayed delivery'
 \i tests/acceptance/us4_delayed_delivery.sql
 \echo ''
+\echo 'Running: US-6 Graceful rotation under consumer lag'
+\i tests/acceptance/us6_rotation_lag.sql
+\echo ''
 \echo 'Running: US-9 Observability and health monitoring'
 \i tests/acceptance/us9_observability.sql
 \echo ''
