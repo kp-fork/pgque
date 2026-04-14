@@ -38,15 +38,23 @@ This is the key point: PgQue gives you queue semantics **inside** Postgres, with
 |---|---|---|---|---|---|---|
 | Lockless snapshot-based claim mechanism | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Zero bloat under sustained load | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| No C extension required | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Managed Postgres friendly | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| No C extension required | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ |
+| Managed Postgres friendly | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ |
 | Language-agnostic SQL API | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Multiple independent consumers | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Multiple independent consumers | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Built-in retry queue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Built-in dead letter queue | ✅ | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
 | Battle-tested core architecture | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Legend:** ✅ yes · ❌ no · ⚠️ partial / indirect
+
+**Notes:** PGMQ added a SQL-only install path in Feb 2025, so it can now run
+without the Rust extension on managed Postgres — but the extension is still the
+primary distribution method. pg-boss supports fan-out via its
+`publish()`/`subscribe()` API. Oban is a competing-consumers work queue — multiple
+workers process jobs in parallel, but each job goes to exactly one worker (no
+pub-sub fan-out). "Battle-tested core architecture" refers specifically to the
+PgQ engine (~2007, Skype/Microsoft scale), not general project maturity.
 
 ## Installation
 
