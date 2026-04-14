@@ -3973,11 +3973,11 @@ declare
     v_maint_id bigint;
     v_dbname text;
 begin
-    -- Require pg_cron
+    -- pg_cron is optional; start() specifically requires it because it schedules jobs.
     if not exists (select 1 from pg_extension where extname = 'pg_cron') then
         raise exception 'pg_cron extension is not installed. '
-            'Install pg_cron first: CREATE EXTENSION pg_cron; '
-            'Or run pgque.ticker() and maintenance manually.';
+            'PgQue itself works without pg_cron, but pgque.start() schedules cron jobs. '
+            'Install pg_cron first, or run pgque.ticker() and pgque.maint() manually.';
     end if;
 
     -- Idempotent: stop existing jobs first
