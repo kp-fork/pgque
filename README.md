@@ -7,6 +7,21 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![pg_cron](https://img.shields.io/badge/pg__cron-optional-336791)](https://github.com/citusdata/pg_cron)
 
+## Contents
+
+- [Why PgQue](#why-pgque)
+- [Comparison](#comparison)
+- [Installation](#installation)
+- [Project status](#project-status)
+- [Quick start](#quick-start)
+- [Usage examples](#usage-examples)
+- [Client libraries](#client-libraries)
+- [Function reference](#function-reference)
+- [Benchmarks](#benchmarks)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
+
 PgQue brings back [PgQ](https://github.com/pgq/pgq) — one of the most proven PostgreSQL queue architectures ever built — in a form that fits modern Postgres.
 
 PgQ was originally designed at Skype, with architecture meant to serve **1B users**, and it was used in very large self-managed PostgreSQL installations for years. That knowledge is mostly forgotten ancient arto now — real database kung fu from the era when people solved brutal scale problems without cargo-culting another distributed system into the stack.
@@ -47,28 +62,27 @@ This is the key point: PgQue gives you queue semantics **inside** Postgres, with
 
 **Legend:** ✅ yes · ❌ no · ⚠️ partial / indirect
 
-**Notes:** [PgQ](https://github.com/pgq/pgq) is the original Skype-era
-queue engine (~2007) that PgQue is derived from. PgQ has the same
-snapshot/rotation architecture but requires C extensions (`pgq_lowlevel`,
-`pgq_triggers`) and an external daemon (`pgqd`) — making it unavailable on
-managed Postgres. PgQue removes both constraints. PgQue and PGMQ run
-entirely inside PostgreSQL — no external binary, container, or sidecar
-process needed for queue operations (PgQue uses pg_cron for
-ticker/maintenance; PGMQ uses visibility timeouts). River requires a Go
-binary, graphile-worker and pg-boss require Node.js, and Oban requires the
-Elixir/BEAM VM. All SKIP LOCKED systems use row-level locking + DELETE,
-which creates dead tuples requiring VACUUM. PgQue and PgQ use snapshot
-isolation + TRUNCATE rotation — zero dead tuples in event tables by
-construction. PGMQ retry is via visibility timeout re-delivery (`read_ct`
-tracking) — no configurable backoff or max attempts built in.
-graphile-worker has an `add_job()` SQL function for enqueuing from any
-language, but workers are Node.js-only. pg-boss supports fan-out via its
-`publish()`/`subscribe()` API (copy-per-queue, not a shared event log).
-River, graphile-worker, pg-boss, and Oban are primarily **job queue
-frameworks** with worker executors, priority queues, cron scheduling, and
-per-job lifecycle management — features PgQue does not provide. PgQue is an
-**event/message queue** optimized for high-throughput streaming with
-fan-out.
+**Notes:**
+
+- **[PgQ](https://github.com/pgq/pgq)** is the original Skype-era queue
+  engine (~2007) that PgQue is derived from. Same snapshot/rotation
+  architecture, but requires C extensions and an external daemon (`pgqd`) —
+  unavailable on managed Postgres. PgQue removes both constraints.
+- **No external daemon:** PgQue uses pg_cron for ticker/maintenance; PGMQ
+  uses visibility timeouts. Both run entirely inside PostgreSQL. River
+  requires a Go binary, graphile-worker and pg-boss require Node.js, Oban
+  requires Elixir/BEAM.
+- **PGMQ retry** is via visibility timeout re-delivery (`read_ct`
+  tracking) — no configurable backoff or max attempts built in.
+- **graphile-worker** has an `add_job()` SQL function for enqueuing from
+  any language, but workers are Node.js-only.
+- **pg-boss fan-out** uses `publish()`/`subscribe()` with copy-per-queue
+  semantics, not a shared event log with independent cursors.
+- **Category difference:** River, graphile-worker, pg-boss, and Oban are
+  **job queue frameworks** with worker executors, priority queues, cron
+  scheduling, and per-job lifecycle management — features PgQue does not
+  provide. PgQue is an **event/message queue** optimized for
+  high-throughput streaming with fan-out.
 
 ### What genuinely differentiates PgQue
 
