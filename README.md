@@ -38,23 +38,28 @@ This is the key point: PgQue gives you queue semantics **inside** Postgres, with
 |---|---|---|---|---|---|---|
 | Lockless snapshot-based claim mechanism | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Zero bloat under sustained load | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| No C extension required | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ |
-| Managed Postgres friendly | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ |
-| Language-agnostic SQL API | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| No C extension required | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Managed Postgres friendly | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Language-agnostic SQL API | ✅ | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | Multiple independent consumers | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| Built-in retry queue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Built-in retry with backoff | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ |
 | Built-in dead letter queue | ✅ | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
-| Battle-tested core architecture | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Legend:** ✅ yes · ❌ no · ⚠️ partial / indirect
 
-**Notes:** PGMQ added a SQL-only install path in Feb 2025, so it can now run
-without the Rust extension on managed Postgres — but the extension is still the
-primary distribution method. pg-boss supports fan-out via its
-`publish()`/`subscribe()` API. Oban is a competing-consumers work queue — multiple
-workers process jobs in parallel, but each job goes to exactly one worker (no
-pub-sub fan-out). "Battle-tested core architecture" refers specifically to the
-PgQ engine (~2007, Skype/Microsoft scale), not general project maturity.
+**Notes:** PGMQ was rewritten to pure PL/pgSQL in mid-2024 and supports
+`\i pgmq.sql` install on managed Postgres. PGMQ retry is via visibility
+timeout re-delivery (`read_ct` tracking) — no configurable backoff or max
+attempts built in. graphile-worker has an `add_job()` SQL function for
+enqueuing from any language, but workers are Node.js-only. pg-boss supports
+fan-out via its `publish()`/`subscribe()` API (copy-per-queue, not a shared
+event log). River, graphile-worker, pg-boss, and Oban are primarily **job
+queue frameworks** with worker executors, priority queues, cron scheduling,
+and per-job lifecycle management — features PgQue does not provide. PgQue is
+an **event/message queue** optimized for high-throughput streaming with
+fan-out, where the key differentiators are snapshot-based batch isolation
+and TRUNCATE-based table rotation (zero dead tuples in event tables under
+sustained load).
 
 ## Installation
 
