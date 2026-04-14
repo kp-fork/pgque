@@ -53,22 +53,20 @@ begin
   raise notice 'PASS: US-5 received and acked 10,000 events';
 end $$;
 
--- Verify: queue_stats() shows depth=0 (consumer advanced to latest tick on ack)
+-- Verify: consumer advanced after ack (without relying on experimental observability)
 do $$
 declare
-  v_row record;
-  v_found bool := false;
+  v_batch bigint;
 begin
-  for v_row in select * from pgque.queue_stats()
-  loop
-    if v_row.queue_name = 'us5_ingest' then
-      v_found := true;
-      assert v_row.depth = 0,
-        'queue depth should be 0 after ack, got ' || v_row.depth;
-    end if;
-  end loop;
-  assert v_found, 'queue_stats should include us5_ingest';
-  raise notice 'PASS: US-5 queue_stats() depth=0 after ack';
+  select sub_batch into v_batch
+  from pgque.subscription s
+  join pgque.queue q on q.queue_id = s.sub_queue
+  join pgque.consumer c on c.co_id = s.sub_consumer
+  where q.queue_name = 'us5_ingest'
+    and c.co_name = 'etl';
+
+  assert v_batch is null, 'subscription batch should be cleared after ack';
+  raise notice 'PASS: US-5 consumer batch cleared after ack';
 end $$;
 
 -- Verify: no dead tuples in pgque event tables

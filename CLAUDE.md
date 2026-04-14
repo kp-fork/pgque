@@ -28,7 +28,7 @@ snapshot isolation, batch_event_sql algorithm, dual-filter optimization).
 ## Stack
 
 - Pure SQL + PL/pgSQL (no extensions, no `.control` file)
-- Anti-extension design: `\i pgque-install.sql` to install
+- Anti-extension design: `\i pgque.sql` to install
 - Works on RDS, Aurora, Cloud SQL, AlloyDB, Supabase, Neon, Crunchy Bridge
 - Optional pg_cron for automated ticker and maintenance
 - PostgreSQL 14+ required (uses `pg_snapshot`, `xid8`)
@@ -82,8 +82,8 @@ pgque/
     SPECx.md           -- pgque specification (the main spec)
     SPEC.md            -- PgQ internals reference (from pgq repo)
   sql/                 -- source SQL files
-    pgque-install.sql  -- single-file install (built from sources)
-    pgque-uninstall.sql
+    pgque.sql  -- single-file install (built from sources)
+    pgque-unpgque.sql
   tests/               -- regression tests (sql/ + expected/)
   clients/             -- client libraries
     python/            -- pgque-py

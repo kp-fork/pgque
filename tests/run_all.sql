@@ -2,7 +2,7 @@
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 --
 -- Usage: psql -d pgque_test -f tests/run_all.sql
--- Requires: pgque-install.sql already loaded
+-- Requires: pgque.sql already loaded
 
 -- Abort on first error
 \set ON_ERROR_STOP on
@@ -52,17 +52,8 @@
 \echo 'Running: test_api_send'
 \i tests/test_api_send.sql
 
-\echo 'Running: test_api_delayed'
-\i tests/test_api_delayed.sql
-
 \echo 'Running: test_api_receive'
 \i tests/test_api_receive.sql
-
-\echo 'Running: test_api_dlq'
-\i tests/test_api_dlq.sql
-
-\echo 'Running: test_observability'
-\i tests/test_observability.sql
 
 \echo ''
 \echo '=== ALL TESTS PASSED ==='

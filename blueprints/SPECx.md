@@ -71,7 +71,7 @@ C and PL-only installs. Total PL-only source: ~4,028 lines across 40 files.
 The positioning: "PgQ already works in pure SQL -- we packaged it so you can
 use it on managed databases, and added modern conveniences."
 
-Installation: `\i pgque-install.sql` followed by `SELECT pgque.start()`.
+Installation: `\i pgque.sql` followed by `SELECT pgque.start()`.
 
 ### License
 
@@ -214,7 +214,7 @@ Given the landscape, pgque's value proposition rests on six pillars:
 
 3. **No extra infrastructure.** One SQL file. No Redis, no separate server
    process, no C extension to compile, no `shared_preload_libraries`, no
-   server restart. `\i pgque-install.sql` and you have a production queue.
+   server restart. `\i pgque.sql` and you have a production queue.
    pg_cron (pre-installed on every major managed provider) handles the ticker.
 
 4. **Battle-tested core.** PgQ has run at Skype/Microsoft scale for 15+ years,
@@ -487,7 +487,7 @@ without pg_cron.
 PgQ installs via `CREATE EXTENSION pgq`. pgque installs via a single SQL file:
 
 ```
-\i pgque-install.sql
+\i pgque.sql
 SELECT pgque.start();  -- optional: creates pg_cron jobs
 ```
 
@@ -597,7 +597,7 @@ after each tick, enabling low-latency consumer wakeup.
 | Transaction ID type | `bigint` | `xid8` | Type change |
 | Snapshot type | `txid_snapshot` | `pg_snapshot` | Type change |
 | Daemon | `pgqd` (external C) | `pg_cron` jobs | Architecture |
-| Installation | `CREATE EXTENSION` | `\i pgque-install.sql` | Packaging |
+| Installation | `CREATE EXTENSION` | `\i pgque.sql` | Packaging |
 | `search_path` pinning | Missing | On all SECURITY DEFINER functions | Security |
 | `queue_per_tx_limit` | Supported (C) | Removed | Scope reduction |
 | `default_with_oids` | Set to 'off' | Removed (PG12+) | Cleanup |
@@ -1858,7 +1858,7 @@ dependency and apply transformations mechanically during the build step.
 pgque/
   pgq/                 -- git submodule pointing to github.com/pgq/pgq
   sql/
-    pgque-install.sql   -- built from pgq/ sources + pgque additions
+    pgque.sql   -- built from pgq/ sources + pgque additions
   build/
     transform.sh        -- mechanical rename + modernization script
 ```
@@ -1868,7 +1868,7 @@ The build script (`transform.sh`) reads PgQ's PL-only source files, applies
 the mechanical transformations (schema rename, `txid_*` -> `pg_*`, `xid8`,
 `search_path` pinning, cleanup), and concatenates the result with pgque's
 new code (modern API, DLQ, delayed events, observability) into
-`pgque-install.sql`.
+`pgque.sql`.
 
 **Why git submodule:**
 
@@ -1900,14 +1900,14 @@ keeps the upstream relationship clean.
 9. Remove `set default_with_oids = 'off'`
 10. Remove `maint_operations` pgq_node/Londiste hooks
 11. Add `pgque.config` table
-12. Build concatenated `pgque-install.sql` and `pgque-uninstall.sql`
+12. Build concatenated `pgque.sql` and `pgque-unpgque.sql`
 13. Create roles: `pgque_reader`, `pgque_writer`, `pgque_admin`
 14. Regression tests: run PgQ's existing test suite against pgque
 
 **Tests for Sprint 1:**
 - Every PgQ test case (from `sql/` + `expected/`) passes against pgque after rename
-- `\i pgque-install.sql` is idempotent (run twice, no errors)
-- `pgque-uninstall.sql` cleanly removes all objects
+- `\i pgque.sql` is idempotent (run twice, no errors)
+- `pgque-unpgque.sql` cleanly removes all objects
 - `pgque_reader` can call `get_queue_info()` but not `insert_event()`
 - `pgque_writer` can call `insert_event()` but not `drop_queue()`
 - `pgque_admin` can call all functions including `drop_queue()`
@@ -2565,7 +2565,7 @@ need DBA access or custom extensions.
 
 ```
 Setup:   fresh managed PG database with pg_cron enabled
-Action:  \i pgque-install.sql
+Action:  \i pgque.sql
          select pgque.start()
 Verify:  pgque.status() shows ticker and maint running
          create queue, send, ticker, receive, ack all work
@@ -2598,7 +2598,7 @@ Verify:  queue_stats() shows correct depth, throughput, DLQ count
 ```
 Setup:   install pgque, create queues, insert events, subscribe consumers
          note current queue depth and consumer positions
-Action:  run \i pgque-install.sql again
+Action:  run \i pgque.sql again
 Verify:  no errors
          existing queues and events are preserved (check depth matches)
          consumer positions are preserved (sub_last_tick unchanged)

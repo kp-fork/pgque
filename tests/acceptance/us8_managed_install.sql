@@ -56,6 +56,8 @@ end $$;
 do $$ begin
   perform pgque.force_tick('us8_managed');
   perform pgque.ticker();
+  perform pgque.force_tick('us8_managed');
+  perform pgque.ticker();
 end $$;
 
 do $$
@@ -77,22 +79,6 @@ begin
   assert v_count = 1, 'should receive exactly 1 event, got ' || v_count;
   perform pgque.ack(v_batch_id);
   raise notice 'PASS: US-8 full send/tick/receive/ack cycle works';
-end $$;
-
--- Verify: queue_health() returns checks
-do $$
-declare
-  v_row record;
-  v_count int := 0;
-begin
-  for v_row in select * from pgque.queue_health()
-  loop
-    v_count := v_count + 1;
-  end loop;
-
-  assert v_count >= 1,
-    'queue_health() should return at least 1 check, got ' || v_count;
-  raise notice 'PASS: US-8 queue_health() returns % checks', v_count;
 end $$;
 
 -- Verify: pgque.stop() does not error (even without pg_cron)

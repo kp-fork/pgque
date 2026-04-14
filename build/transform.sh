@@ -466,13 +466,13 @@ sed -i "s/arr := arr || ',' || rec.id1::text;/arr := arr || ',''' || rec.id1::te
 
 echo "PASS: xid8 casts added to batch_event_sql dynamic SQL"
 
-# -- Assembly: build sql/pgque-install.sql ------------------------------------
+# -- Assembly: build sql/pgque.sql ------------------------------------
 
 echo ""
-echo "=== Assembling sql/pgque-install.sql ==="
+echo "=== Assembling sql/pgque.sql ==="
 
 SQL_DIR="${REPO_ROOT}/sql"
-INSTALL_FILE="${SQL_DIR}/pgque-install.sql"
+INSTALL_FILE="${SQL_DIR}/pgque.sql"
 ADDITIONS_DIR="${SQL_DIR}/pgque-additions"
 
 apply_idempotency_guards() {
@@ -504,12 +504,12 @@ apply_idempotency_guards() {
 
 # Start with header
 cat > "${INSTALL_FILE}" << 'HEADER'
--- pgque-install.sql -- PgQ Universal Edition
+-- pgque.sql -- PgQ Universal Edition
 -- Version: 1.0.0-dev
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 -- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
 --
--- Install: \i pgque-install.sql
+-- Install: \i pgque.sql
 -- Start:   SELECT pgque.start();
 -- Usage:   See https://github.com/NikolayS/pgque
 
@@ -627,15 +627,22 @@ for addition_file in config.sql queue_max_retries.sql lifecycle.sql roles.sql; d
   echo "" >> "${INSTALL_FILE}"
 done
 
-# Section 7: pgque-api (modern API layer)
+# Section 7: pgque-api (default v0.1 API surface)
 API_DIR="${SQL_DIR}/pgque-api"
 if [[ -d "${API_DIR}" ]]; then
   echo "-- ======================================================================" >> "${INSTALL_FILE}"
-  echo "-- Section 7: pgque-api (modern API layer)" >> "${INSTALL_FILE}"
+  echo "-- Section 7: pgque-api (default v0.1 API surface)" >> "${INSTALL_FILE}"
   echo "-- ======================================================================" >> "${INSTALL_FILE}"
   echo "" >> "${INSTALL_FILE}"
 
-  for api_file in "${API_DIR}"/*.sql; do
+  DEFAULT_API_FILES=(
+    maint.sql
+    receive.sql
+    send.sql
+  )
+
+  for api_name in "${DEFAULT_API_FILES[@]}"; do
+    api_file="${API_DIR}/${api_name}"
     if [[ -f "${api_file}" ]]; then
       echo "-- pgque-api/$(basename "${api_file}")" >> "${INSTALL_FILE}"
       cat "${api_file}" >> "${INSTALL_FILE}"
@@ -655,7 +662,7 @@ echo "=== Assembly verification ==="
 asm_errors=0
 
 # Verify header is present
-if head -1 "${INSTALL_FILE}" | grep -q 'pgque-install.sql'; then
+if head -1 "${INSTALL_FILE}" | grep -q 'pgque.sql'; then
   echo "PASS: Install script header present"
 else
   echo "FAIL: Install script header missing"
@@ -727,24 +734,24 @@ else
   asm_errors=$((asm_errors + 1))
 fi
 
-# Verify pgque-api delayed delivery is in the script
-if grep -q 'maint_deliver_delayed\|send_at\|delayed_events' "${INSTALL_FILE}"; then
-  echo "PASS: pgque-api delayed delivery present in install script"
+# Verify default pgque-api functions are in the script
+if grep -q 'pgque.receive\|pgque.ack\|pgque.send\|pgque.subscribe\|pgque.maint' "${INSTALL_FILE}"; then
+  echo "PASS: default pgque-api surface present in install script"
 else
-  echo "FAIL: pgque-api delayed delivery not found in install script"
+  echo "FAIL: default pgque-api surface not found in install script"
   asm_errors=$((asm_errors + 1))
 fi
 
-# Verify pgque-api receive/ack/DLQ functions are in the script
-if grep -q 'pgque.receive\|pgque.ack\|pgque.nack' "${INSTALL_FILE}"; then
-  echo "PASS: pgque-api receive/ack/nack present in install script"
-else
-  echo "FAIL: pgque-api receive/ack/nack not found in install script"
+# Verify experimental APIs are NOT in the default install script
+if grep -q 'maint_deliver_delayed\|send_at\|delayed_events\|dlq_inspect\|otel_metrics\|queue_stats' "${INSTALL_FILE}"; then
+  echo "FAIL: experimental APIs leaked into default install script"
   asm_errors=$((asm_errors + 1))
+else
+  echo "PASS: experimental APIs excluded from default install script"
 fi
 
-# Verify pgque-api section is present (if api files exist)
-if [[ -d "${API_DIR}" ]] && ls "${API_DIR}"/*.sql >/dev/null 2>&1; then
+# Verify pgque-api section is present (if default api files exist)
+if [[ -d "${API_DIR}" ]]; then
   if grep -q 'Section 7: pgque-api' "${INSTALL_FILE}"; then
     echo "PASS: pgque-api section present in install script"
   else
