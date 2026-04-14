@@ -6,12 +6,30 @@
 [![PostgreSQL 14-18](https://img.shields.io/badge/PostgreSQL-14--18-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![pg_cron](https://img.shields.io/badge/pg__cron-optional-336791)](https://github.com/citusdata/pg_cron)
+[![Anti-Extension](https://img.shields.io/badge/anti--extension-%5Ci_and_go-orange)](https://github.com/NikolayS/pgque)
+
+## Contents
+
+- [Why PgQue](#why-pgque)
+- [Comparison](#comparison)
+- [Installation](#installation)
+- [Project status](#project-status)
+- [Quick start](#quick-start)
+- [Usage examples](#usage-examples)
+- [Client libraries](#client-libraries)
+- [Function reference](#function-reference)
+- [Benchmarks](#benchmarks)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
 
 PgQue brings back [PgQ](https://github.com/pgq/pgq) — one of the most proven PostgreSQL queue architectures ever built — in a form that fits modern Postgres.
 
 PgQ was originally designed at Skype, with architecture meant to serve **1B users**, and it was used in very large self-managed PostgreSQL installations for years. That knowledge is mostly forgotten ancient arto now — real database kung fu from the era when people solved brutal scale problems without cargo-culting another distributed system into the stack.
 
 PgQue takes that battle-tested core and repackages it as an extension-free, managed-Postgres-friendly project.
+
+**The anti-extension.** Pure SQL + PL/pgSQL that works on any Postgres 14+ — including RDS, Cloud SQL, AlloyDB, Supabase, Neon, and every other managed provider. No C extension, no `shared_preload_libraries`, no provider approval, no restart. Just `\i` and go.
 
 If you want the historical context, two decks are worth your time:
 
@@ -34,19 +52,88 @@ This is the key point: PgQue gives you queue semantics **inside** Postgres, with
 
 ## Comparison
 
-| Feature | PgQue | PGMQ | River | graphile-worker | pg-boss | Oban |
+| Feature | PgQue | PgQ | PGMQ | River | Que | pg-boss |
 |---|---|---|---|---|---|---|
-| Lockless snapshot-based claim mechanism | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Zero bloat under sustained load | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| No C extension required | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Managed Postgres friendly | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Language-agnostic SQL API | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Multiple independent consumers | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Built-in retry queue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Built-in dead letter queue | ✅ | ⚠️ | ❌ | ❌ | ✅ | ⚠️ |
-| Battle-tested core architecture | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Snapshot-based batching (no row locks) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Zero bloat under sustained load | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| No external daemon or worker binary | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Pure SQL install, managed Postgres ready | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Language-agnostic SQL API | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Multiple independent consumers (fan-out) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Built-in retry with backoff | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| Built-in dead letter queue | ✅ | ❌ | ⚠️ | ❌ | ❌ | ✅ |
 
 **Legend:** ✅ yes · ❌ no · ⚠️ partial / indirect
+
+**Notes:**
+
+- **[PgQ](https://github.com/pgq/pgq)** is the original Skype-era queue
+  engine (~2007) that PgQue is derived from. Same snapshot/rotation
+  architecture, but requires C extensions and an external daemon (`pgqd`) —
+  unavailable on managed Postgres. PgQue removes both constraints.
+- **No external daemon:** PgQue uses pg_cron for ticker/maintenance; PGMQ
+  uses visibility timeouts. Both run entirely inside PostgreSQL. River
+  requires a Go binary, Que requires Ruby, pg-boss requires Node.js.
+- **[Que](https://github.com/que-rb/que)** uses advisory locks (not
+  SKIP LOCKED) — no dead tuples from *claiming*, but completed jobs are
+  still DELETEd. Brandur's famous
+  [bloat post](https://brandur.org/postgres-queues) was about Que at Heroku.
+  Ruby-only.
+- **PGMQ retry** is via visibility timeout re-delivery (`read_ct`
+  tracking) — no configurable backoff or max attempts built in.
+- **pg-boss fan-out** uses `publish()`/`subscribe()` with copy-per-queue
+  semantics, not a shared event log with independent cursors.
+- **Category difference:** River, Que, and pg-boss are **job queue
+  frameworks** with worker executors, priority queues, and per-job lifecycle
+  management. PgQue is an **event/message queue** optimized for
+  high-throughput streaming with fan-out. See also: Oban (Elixir),
+  graphile-worker (Node.js), solid_queue (Ruby/Rails), good_job (Ruby).
+
+### What genuinely differentiates PgQue
+
+**1. Zero event-table bloat under sustained load (structural, not tuning-dependent)**
+
+SKIP LOCKED queues (PGMQ, River, pg-boss, Oban, graphile-worker) all use
+UPDATE + DELETE on rows, creating dead tuples that require VACUUM. Under
+sustained load this causes documented, reproducible production failures:
+
+- [Brandur/Heroku (2015)](https://brandur.org/postgres-queues): single open
+  transaction caused 60k job backlog in one hour
+- [PlanetScale (2026)](https://planetscale.com/blog/keeping-a-postgres-queue-healthy):
+  death spiral at 800 jobs/sec with shared analytics queries
+- [River issue #59](https://github.com/riverqueue/river/issues/59):
+  autovacuum starvation documented at Heroku
+- Oban Pro shipped table partitioning specifically to mitigate bloat
+- PGMQ/Tembo ships aggressive autovacuum settings baked into their container
+  image
+
+PgQue's TRUNCATE rotation creates zero dead tuples in event tables by
+construction. No tuning required, immune to xmin horizon pinning. This
+matters most at sustained high throughput or when the queue database is
+shared with OLAP workloads.
+
+**2. Native fan-out (multiple independent consumers on a shared event log)**
+
+Each registered consumer maintains its own cursor position and independently
+receives all events. This is fundamentally different from competing-consumers
+(SKIP LOCKED) where each job goes to one worker. pg-boss has fan-out but it
+is copy-per-queue (one INSERT per subscriber per event). PgQue's model is
+position-in-shared-log — no data duplication, atomic batch boundaries, late
+subscribers catch up.
+
+This makes PgQue more analogous to Kafka topics than to a job queue.
+
+### When to use PgQue vs. a job queue
+
+PgQue is an **event/message queue**. River, graphile-worker, pg-boss, and
+Oban are **job queue frameworks**. They are different categories:
+
+- **Choose PgQue** when you want event-driven fan-out, zero-maintenance
+  bloat behavior, language-agnostic SQL API, and you do not need per-job
+  priorities/scheduling/worker frameworks
+- **Choose a job queue** when you need per-job lifecycle management,
+  sub-3ms latency, priority queues, cron scheduling, unique jobs, and
+  deep ecosystem integration (Elixir/Go/Node.js/Ruby)
 
 ## Installation
 
