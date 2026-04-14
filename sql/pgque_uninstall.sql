@@ -1,4 +1,4 @@
--- pgque-uninstall.sql -- Remove pgque from database
+-- pgque-unpgque.sql -- Remove pgque from database
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 
 do $$ begin

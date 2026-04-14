@@ -1,9 +1,9 @@
--- pgque-install.sql -- PgQ Universal Edition
+-- pgque.sql -- PgQ Universal Edition
 -- Version: 1.0.0-dev
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 -- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
 --
--- Install: \i pgque-install.sql
+-- Install: \i pgque.sql
 -- Start:   SELECT pgque.start();
 -- Usage:   See https://github.com/NikolayS/pgque
 
@@ -3973,11 +3973,11 @@ declare
     v_maint_id bigint;
     v_dbname text;
 begin
-    -- Require pg_cron
+    -- pg_cron is optional; start() specifically requires it because it schedules jobs.
     if not exists (select 1 from pg_extension where extname = 'pg_cron') then
         raise exception 'pg_cron extension is not installed. '
-            'Install pg_cron first: CREATE EXTENSION pg_cron; '
-            'Or run pgque.ticker() and maintenance manually.';
+            'PgQue itself works without pg_cron, but pgque.start() schedules cron jobs. '
+            'Install pg_cron first, or run pgque.ticker() and pgque.maint() manually.';
     end if;
 
     -- Idempotent: stop existing jobs first
@@ -4632,24 +4632,31 @@ begin
     left join pgque.dead_letter dl on dl.dl_queue_id = q.queue_id
     group by q.queue_name;
 
-    -- Check: pg_cron jobs
-    return query
-    select 'system'::text, 'pg_cron_ticker'::text,
-        case when cfg.ticker_job_id is null then 'critical'
-             else 'ok' end,
-        case when cfg.ticker_job_id is null
-             then 'ticker job not scheduled'
-             else 'job_id=' || cfg.ticker_job_id::text end
-    from pgque.config cfg;
+    -- Check: pg_cron jobs, but only when pg_cron is installed.
+    if exists (select 1 from pg_extension where extname = 'pg_cron') then
+        return query
+        select 'system'::text, 'pg_cron_ticker'::text,
+            case when cfg.ticker_job_id is null then 'critical'
+                 else 'ok' end,
+            case when cfg.ticker_job_id is null
+                 then 'ticker job not scheduled'
+                 else 'job_id=' || cfg.ticker_job_id::text end
+        from pgque.config cfg;
 
-    return query
-    select 'system'::text, 'pg_cron_maint'::text,
-        case when cfg.maint_job_id is null then 'critical'
-             else 'ok' end,
-        case when cfg.maint_job_id is null
-             then 'maint job not scheduled'
-             else 'job_id=' || cfg.maint_job_id::text end
-    from pgque.config cfg;
+        return query
+        select 'system'::text, 'pg_cron_maint'::text,
+            case when cfg.maint_job_id is null then 'critical'
+                 else 'ok' end,
+            case when cfg.maint_job_id is null
+                 then 'maint job not scheduled'
+                 else 'job_id=' || cfg.maint_job_id::text end
+        from pgque.config cfg;
+    else
+        return query
+        select 'system'::text, 'scheduler'::text,
+            'info'::text,
+            'pg_cron not installed; run pgque.ticker() and pgque.maint() manually or from an external scheduler'::text;
+    end if;
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 

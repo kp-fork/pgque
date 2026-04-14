@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 -- US-10: Idempotent install
--- As an operator, I want to re-run pgque-install.sql without losing
+-- As an operator, I want to re-run pgque.sql without losing
 -- existing queues, consumers, or event data.
 -- SPECx.md section 13.3
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
@@ -87,7 +87,7 @@ end $$;
 -- ==============================
 -- Phase 2: Re-run install (idempotent)
 -- ==============================
-\i sql/pgque-install.sql
+\i sql/pgque.sql
 
 -- ==============================
 -- Phase 3: Verify state preserved
@@ -95,7 +95,7 @@ end $$;
 
 -- Verify: no errors during install (if we got here, install succeeded)
 do $$ begin
-  raise notice 'PASS: US-10 pgque-install.sql re-run completed without errors';
+  raise notice 'PASS: US-10 pgque.sql re-run completed without errors';
 end $$;
 
 -- Verify: queues still exist with same count

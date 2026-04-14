@@ -2,7 +2,7 @@
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 --
 -- Usage: psql -d pgque_test -f tests/run_all.sql
--- Requires: pgque-install.sql already loaded
+-- Requires: pgque.sql already loaded
 
 -- Abort on first error
 \set ON_ERROR_STOP on

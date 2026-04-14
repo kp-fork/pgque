@@ -466,13 +466,13 @@ sed -i "s/arr := arr || ',' || rec.id1::text;/arr := arr || ',''' || rec.id1::te
 
 echo "PASS: xid8 casts added to batch_event_sql dynamic SQL"
 
-# -- Assembly: build sql/pgque-install.sql ------------------------------------
+# -- Assembly: build sql/pgque.sql ------------------------------------
 
 echo ""
-echo "=== Assembling sql/pgque-install.sql ==="
+echo "=== Assembling sql/pgque.sql ==="
 
 SQL_DIR="${REPO_ROOT}/sql"
-INSTALL_FILE="${SQL_DIR}/pgque-install.sql"
+INSTALL_FILE="${SQL_DIR}/pgque.sql"
 ADDITIONS_DIR="${SQL_DIR}/pgque-additions"
 
 apply_idempotency_guards() {
@@ -504,12 +504,12 @@ apply_idempotency_guards() {
 
 # Start with header
 cat > "${INSTALL_FILE}" << 'HEADER'
--- pgque-install.sql -- PgQ Universal Edition
+-- pgque.sql -- PgQ Universal Edition
 -- Version: 1.0.0-dev
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 -- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
 --
--- Install: \i pgque-install.sql
+-- Install: \i pgque.sql
 -- Start:   SELECT pgque.start();
 -- Usage:   See https://github.com/NikolayS/pgque
 
@@ -655,7 +655,7 @@ echo "=== Assembly verification ==="
 asm_errors=0
 
 # Verify header is present
-if head -1 "${INSTALL_FILE}" | grep -q 'pgque-install.sql'; then
+if head -1 "${INSTALL_FILE}" | grep -q 'pgque.sql'; then
   echo "PASS: Install script header present"
 else
   echo "FAIL: Install script header missing"
