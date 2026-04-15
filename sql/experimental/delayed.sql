@@ -70,8 +70,16 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 
 -- maint() -- top-level maintenance wrapper
 --
--- Calls PgQ's maint_operations() (rotation, vacuum, retry) and also
+-- Calls PgQ's maint_operations() (rotation, retry) and also
 -- runs maint_deliver_delayed() for delayed event delivery.
+--
+-- IMPORTANT: rotation step2 and VACUUM are skipped here.
+--
+-- Step2 MUST run in a separate transaction from step1 (PgQ design
+-- requirement). pgque.start() schedules step2 as its own pg_cron job.
+--
+-- VACUUM is skipped because autovacuum handles the small metadata
+-- tables, and event tables use TRUNCATE rotation (no dead tuples).
 create or replace function pgque.maint()
 returns integer as $$
 declare
@@ -80,13 +88,15 @@ declare
     r integer;
     total integer := 0;
 begin
-    -- Run PgQ maintenance operations (rotation, retry, vacuum)
+    -- Run PgQ maintenance operations (rotation step1, retry)
+    -- Skip step2 (needs separate TX) and vacuum (autovacuum handles it)
     for f in select func_name, func_arg from pgque.maint_operations()
     loop
-        if f.func_name = 'vacuum' then
-            sql := 'vacuum ' || f.func_arg;
-            execute sql;
-            total := total + 1;
+        if f.func_name = 'pgque.maint_rotate_tables_step2' then
+            -- Step2 runs in a separate pg_cron job (pgque_rotate_step2)
+            continue;
+        elsif f.func_name = 'vacuum' then
+            continue;
         elsif f.func_arg is not null then
             execute 'select ' || f.func_name || '(' || quote_literal(f.func_arg) || ')' into r;
             total := total + r;
