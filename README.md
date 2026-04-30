@@ -21,6 +21,7 @@ Discussion on [Hacker News](https://news.ycombinator.com/item?id=47817349).
 
 - [Why PgQue](#why-pgque)
 - [Latency trade-off](#latency-trade-off)
+- [Three latencies](#three-latencies)
 - [Comparison](#comparison)
 - [Installation](#installation)
 - [Roles and grants](#roles-and-grants)
@@ -69,6 +70,16 @@ The trade-off is **end-to-end delivery latency** — the gap between `send` and 
 Ways to reduce delivery latency: tune tick frequency and queue thresholds; use `force_tick()` for tests and demos or to force an immediate batch. Future versions may add logical-decoding-based wake-ups for sub-second delivery without cutting the tick interval.
 
 If your top priority is single-digit-millisecond dispatch, PgQue is the wrong tool. If your priority is **stability under load without bloat**, that is where PgQue fits.
+
+## Three latencies
+
+"Queue latency" is three numbers, not one:
+
+1. **Producer latency** — `send` / `insert_event`. Sub-ms.
+2. **Subscriber latency** — `next_batch` over a pre-built batch. Sub-ms.
+3. **End-to-end delivery** — `send` → consumer visibility. ≈ tick period. Tunable, not floored. Does not grow with load.
+
+See [docs/three-latencies.md](docs/three-latencies.md) for the breakdown, tick-cadence trade-off table, and comparison with UPDATE/DELETE-based designs.
 
 ## Comparison
 

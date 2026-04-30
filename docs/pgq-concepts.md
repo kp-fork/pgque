@@ -66,3 +66,9 @@ below; the function auto-prefixes `queue_` internally.
 > produce huge batches consumers can't handle.
 
 — Kreen & Pihlak, PgCon 2009
+
+## Three latencies
+
+For the full explanation — producer latency, subscriber latency,
+end-to-end delivery, tick-cadence trade-offs, and comparison with
+UPDATE/DELETE-based designs — see [three-latencies.md](three-latencies.md).
