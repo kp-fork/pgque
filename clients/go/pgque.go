@@ -20,10 +20,16 @@ type Client struct {
 
 // Connect opens a pgx connection pool to the given DSN and returns a
 // ready-to-use Client. The DSN format is the standard libpq connection
-// string (postgres://user:pass@host/db?...).
+// string (postgres://user:pass@host/db?...). Connect validates
+// connectivity by pinging the pool before returning; a bad DSN or
+// unreachable host surfaces as an error here, not on the first query.
 func Connect(ctx context.Context, dsn string) (*Client, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
+		return nil, fmt.Errorf("pgque: connect: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("pgque: connect: %w", err)
 	}
 	return &Client{pool: pool}, nil
@@ -106,9 +112,11 @@ func (c *Client) Ack(ctx context.Context, batchID int64) error {
 }
 
 // Nack negatively acknowledges a single message, routing it to retry or DLQ.
+// pgque.message has 10 fields: msg_id, batch_id, type, payload, retry_count,
+// created_at, extra1, extra2, extra3, extra4 — placeholders $2..$11.
 func (c *Client) Nack(ctx context.Context, batchID int64, msg Message) error {
 	_, err := c.pool.Exec(ctx,
-		"SELECT pgque.nack($1, ROW($2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)::pgque.message, '60 seconds'::interval, null)",
+		"SELECT pgque.nack($1, ROW($2,$3,$4,$5,$6,$7,$8,$9,$10,$11)::pgque.message, '60 seconds'::interval, null)",
 		batchID, msg.MsgID, msg.BatchID, msg.Type, msg.Payload,
 		msg.RetryCount, msg.CreatedAt,
 		msg.Extra1, msg.Extra2, msg.Extra3, msg.Extra4)
