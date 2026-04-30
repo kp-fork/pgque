@@ -466,6 +466,35 @@ awk '
 
 echo "PASS: pg_notify injected into ticker function"
 
+CREATE_QUEUE_FILE="${OUTPUT_DIR}/functions/pgque.create_queue.sql"
+awk '
+/^    if i_queue_name is null then$/ {
+  print
+  in_null_check = 1
+  next
+}
+in_null_check && /^    end if;$/ {
+  q = "\047"
+  print
+  print ""
+  print "    -- pg_notify channel names are limited to 63 bytes by PostgreSQL."
+  print "    -- PgQue prefixes them with " q "pgque_" q " (6 bytes), leaving 57 bytes for"
+  print "    -- the queue name.  Reject names that would overflow the channel name"
+  print "    -- before any state is written, so callers get a clear error."
+  print "    if octet_length(i_queue_name) > 57 then"
+  print "        raise exception " q "queue name too long: % bytes (max 57). " q
+  print "            " q "pg_notify channel " q q "pgque_<queue_name>" q q " must fit in 63 bytes." q ","
+  print "            octet_length(i_queue_name);"
+  print "    end if;"
+  in_null_check = 0
+  next
+}
+in_null_check { print; next }
+{ print }
+' "${CREATE_QUEUE_FILE}" > "${CREATE_QUEUE_FILE}.tmp" && mv "${CREATE_QUEUE_FILE}.tmp" "${CREATE_QUEUE_FILE}"
+
+echo "PASS: create_queue queue name length check added"
+
 # Fix inherited PgQ copy-paste bug: sqltriga comment says logutriga
 sedi 's/Function: pgque.logutriga()/Function: pgque.sqltriga()/' "${OUTPUT_DIR}/lowlevel_pl/sqltriga.sql"
 
@@ -626,6 +655,7 @@ echo "--   4. pg_current_xact_id() cast to ::text::bigint (xid8→bigint)" >> "$
 echo "--   5. SECURITY DEFINER functions get SET search_path = pgque, pg_catalog" >> "${INSTALL_FILE}"
 echo "--   6. pgq_node/Londiste hooks removed from maint_operations" >> "${INSTALL_FILE}"
 echo "--   7. pg_notify() injected into ticker for LISTEN/NOTIFY wakeup" >> "${INSTALL_FILE}"
+echo "--   8. create_queue() rejects queue names > 57 bytes (pg_notify limit)" >> "${INSTALL_FILE}"
 echo "-- ======================================================================" >> "${INSTALL_FILE}"
 echo "" >> "${INSTALL_FILE}"
 
