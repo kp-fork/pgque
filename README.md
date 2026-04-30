@@ -146,18 +146,19 @@ With `pg_cron` available in the same database as PgQue, `pgque.start()` creates 
 select pgque.start();
 ```
 
-**pg_cron in a different database.** `pg_cron` runs jobs in one designated database (`cron.database_name`, typically `postgres`). If your PgQue schema lives in a different database, use the [cross-database pattern](https://github.com/citusdata/pg_cron#creating-a-cron-job-in-a-different-database) to call `pgque.ticker()` and `pgque.maint()` across databases. *Todo: a future release will detect this and emit the correct `cron.schedule_in_database` calls from `pgque.start()` automatically.*
+**pg_cron in a different database.** `pg_cron` runs jobs in one designated database (`cron.database_name`, typically `postgres`). If your PgQue schema lives in a different database, use the [cross-database pattern](https://github.com/citusdata/pg_cron#creating-a-cron-job-in-a-different-database) to call `pgque.ticker()`, `pgque.maint_retry_events()`, and `pgque.maint()` across databases. *Todo: a future release will detect this and emit the correct `cron.schedule_in_database` calls from `pgque.start()` automatically.*
 
 **pg_cron log hygiene.** The ticker runs every second, adding ~3,600 rows per hour to `cron.job_run_details` with no built-in purge. Set `alter system set cron.log_run = off;` globally, or schedule a periodic purge — see [the tutorial](docs/tutorial.md#production-cadence-use-pg_cron) for both recipes.
 
 Without `pg_cron`, PgQue still installs. Drive ticking and maintenance from your application or an external scheduler:
 
 ```bash
-PAGER=cat psql --no-psqlrc -c "select pgque.ticker()"   # every 1 second
-PAGER=cat psql --no-psqlrc -c "select pgque.maint()"    # every 30 seconds
+PAGER=cat psql --no-psqlrc -c "select pgque.ticker()"              # every 1 second
+PAGER=cat psql --no-psqlrc -c "select pgque.maint_retry_events()"  # every 30 seconds
+PAGER=cat psql --no-psqlrc -c "select pgque.maint()"               # every 30 seconds
 ```
 
-**Important:** PgQue does not deliver messages without a working ticker. Enqueueing still works, but consumers will see nothing new because no ticks are created. If you do not use `pg_cron`, run `pgque.ticker()` and `pgque.maint()` yourself.
+**Important:** PgQue does not deliver messages without a working ticker. Enqueueing still works, but consumers will see nothing new because no ticks are created. If you do not use `pg_cron`, run `pgque.ticker()`, `pgque.maint_retry_events()`, and `pgque.maint()` yourself. Skipping `maint_retry_events()` means nack'd events will never be redelivered.
 
 Treat installation as one-way for now — upgrade and reinstall paths are still being tightened. To uninstall: `\i sql/pgque_uninstall.sql`.
 
@@ -184,13 +185,15 @@ create user metrics with password '...';              -- replace with a real pas
 grant pgque_reader to metrics;
 ```
 
-DDL-class operations (`create_queue`, `drop_queue`, `start`, `stop`, `maint`, `ticker`, `force_tick`) are not granted to `pgque_writer` and should be performed by an admin / migration role. They currently default to PUBLIC; revoking from PUBLIC and granting only to `pgque_admin` is on the roadmap.
+DDL-class operations (`create_queue`, `drop_queue`, `start`, `stop`, `maint`, `maint_retry_events`, `ticker`, `force_tick`, `set_queue_config`) are not granted to `pgque_writer`. The schema-wide blanket `revoke execute … from public` strips PUBLIC, and `pgque_admin` is the only role that retains `execute` on these helpers — perform them as an admin / migration role.
+
+**Roles are global, not per-queue.** `pgque_writer` can produce and consume on any queue and ack any consumer's batch. Do not grant `pgque_writer` to mutually untrusted applications sharing one database unless you add your own schema-level or database-level isolation. See [docs/reference.md — Roles scope](docs/reference.md#roles-are-global-not-per-queue) for details and recommended isolation patterns.
 
 ## Project status
 
 PgQue is **early-stage** as a product and API layer. PgQ itself has run at Skype scale for over a decade. What's new here is the packaging, modernization, managed-Postgres compatibility, and the higher-level PgQue API around that core.
 
-The default install stays small in v0.1; additional APIs live under `sql/experimental/` until they are worth promoting. See [blueprints/PHASES.md](blueprints/PHASES.md).
+The default install stays small; additional APIs live under `sql/experimental/` until they are worth promoting. See [blueprints/PHASES.md](blueprints/PHASES.md).
 
 ## Docs
 
@@ -212,18 +215,19 @@ select pgque.subscribe('orders', 'processor');
 select pgque.send('orders', '{"order_id": 42, "total": 99.95}'::jsonb);
 
 -- tx 3: advance the queue if you are not using pg_cron
--- (force_tick bypasses lag/count thresholds — handy in demos/tests)
+-- (force_tick bumps the event-seq threshold; ticker() then inserts the tick)
 select pgque.force_tick('orders');
 select pgque.ticker();
 
--- tx 4: receive (batch_id is the same for every returned row)
-select * from pgque.receive('orders', 'processor', 100);
+-- tx 4: receive (all returned rows share the same batch_id)
+create temp table msgs as
+  select * from pgque.receive('orders', 'processor', 100);
 
--- tx 5: acknowledge
-select pgque.ack(:batch_id);
+-- tx 5: acknowledge — pull the batch_id from any returned row
+select pgque.ack((select batch_id from msgs limit 1));
 ```
 
-Send, tick, and receive should be separate transactions — that's PgQ's snapshot-based design working as intended. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_tick()` is mainly for demos, tests, and manual operation.
+Send, tick, and receive should be separate transactions — that's PgQ's snapshot-based design working as intended. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_tick()` is mainly for demos, tests, and manual operation. The temp-table capture above is the safe psql pattern when `receive` returns more than one row; for application code, store the `batch_id` from any returned row.
 
 Longer walkthrough in the [tutorial](docs/tutorial.md); patterns like fan-out, exactly-once, and recurring jobs in [examples](docs/examples.md).
 
@@ -237,7 +241,8 @@ PgQue is SQL-first, so any Postgres driver works. Example client libraries exist
 from pgque import PgqueClient, Consumer
 
 client = PgqueClient(conn)
-client.send("orders", {"order_id": 42})
+# type= must match the event type the consumer listens on
+client.send("orders", {"order_id": 42}, type="order.created")
 
 consumer = Consumer(dsn, queue="orders", name="processor", poll_interval=30)
 
@@ -277,14 +282,21 @@ if (messages.length > 0) await client.ack(messages[0].batch_id);
 
 ```sql
 select pgque.send('orders', '{"order_id": 42}'::jsonb);
-select * from pgque.receive('orders', 'processor', 100);
-select pgque.ack(batch_id);
+
+-- receive returns rows; each row carries the batch_id
+create temp table msgs as
+  select * from pgque.receive('orders', 'processor', 100);
+
+-- ack uses the batch_id from any row (all rows share the same batch_id)
+select pgque.ack((select batch_id from msgs limit 1));
 ```
 
 ## Benchmarks
 
-Preliminary laptop numbers: ~86k ev/s PL/pgSQL insert, ~2.4M ev/s consumer
-read rate, zero dead-tuple growth under a 30-minute sustained test. See
+Preliminary laptop numbers: ~86k ev/s PL/pgSQL insert, ~2.4M ev/s primitive
+batch read rate (`get_batch_events`), zero dead-tuple growth under a 30-minute
+sustained test. The batch read figure reflects raw PgQ primitive throughput,
+not end-to-end `receive()`/`ack()` consumer throughput. See
 [docs/benchmarks.md](docs/benchmarks.md) for the full table and methodology.
 Server-class numbers to follow.
 

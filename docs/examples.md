@@ -60,11 +60,11 @@ begin;
   select (payload::jsonb->>'order_id')::int, 'done'
   from msgs;
 
-  select pgque.ack((select distinct batch_id from msgs limit 1));
+  select pgque.ack((select batch_id from msgs limit 1));
 commit;
 ```
 
-Every row in `msgs` shares the same `batch_id`, so `select distinct batch_id from msgs limit 1` is safe. A PL/pgSQL block with `select batch_id into v_batch_id from msgs limit 1` is equivalent.
+Every row in `msgs` shares the same `batch_id`. **Batch-ownership caveat:** `pgque.ack(batch_id)` advances the consumer past the entire underlying batch, even if `receive()` returned fewer rows than the batch contains (due to `max_return`). Either consume the full batch before acking, or use `max_return >= ticker_max_count` (default 500) to ensure all rows are returned.
 
 ## Recurring jobs with pg_cron
 
