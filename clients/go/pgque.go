@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -141,12 +143,35 @@ func (c *Client) Ack(ctx context.Context, batchID int64) error {
 // Nack negatively acknowledges a single message, routing it to retry or DLQ.
 // pgque.message has 10 fields: msg_id, batch_id, type, payload, retry_count,
 // created_at, extra1, extra2, extra3, extra4 — placeholders $2..$11.
-func (c *Client) Nack(ctx context.Context, batchID int64, msg Message) error {
+//
+// Optional NackOptions tune the call:
+//
+//   - WithRetryAfter overrides the default 60s redelivery delay.
+//   - WithReason overrides the default NULL reason recorded on the
+//     dead_letter row when the retry budget is exhausted.
+//
+// Calls without options preserve the historical defaults (60s, NULL
+// reason) so existing callers do not need changes.
+func (c *Client) Nack(ctx context.Context, batchID int64, msg Message, opts ...NackOption) error {
+	var no nackOptions
+	for _, opt := range opts {
+		opt(&no)
+	}
+	retryAfter := 60 * time.Second
+	if no.retryAfterSet {
+		retryAfter = no.retryAfter
+	}
+	var reason any
+	if no.reasonSet {
+		reason = no.reason
+	}
+	interval := pgtype.Interval{Microseconds: retryAfter.Microseconds(), Valid: true}
 	_, err := c.pool.Exec(ctx,
-		"SELECT pgque.nack($1, ROW($2,$3,$4,$5,$6,$7,$8,$9,$10,$11)::pgque.message, '60 seconds'::interval, null)",
+		"SELECT pgque.nack($1, ROW($2,$3,$4,$5,$6,$7,$8,$9,$10,$11)::pgque.message, $12::interval, $13)",
 		batchID, msg.MsgID, msg.BatchID, msg.Type, msg.Payload,
 		msg.RetryCount, msg.CreatedAt,
-		msg.Extra1, msg.Extra2, msg.Extra3, msg.Extra4)
+		msg.Extra1, msg.Extra2, msg.Extra3, msg.Extra4,
+		interval, reason)
 	if err != nil {
 		return fmt.Errorf("pgque: nack: %w", err)
 	}
@@ -155,15 +180,22 @@ func (c *Client) Nack(ctx context.Context, batchID int64, msg Message) error {
 
 // NewConsumer creates a Consumer that polls the given queue under the
 // given consumer name. The consumer must already be registered in PgQue
-// (e.g. via pgque.register_consumer). Default poll interval is 30s; use
-// WithPollInterval to override.
-func (c *Client) NewConsumer(queue, name string, opts ...Option) *Consumer {
+// (e.g. via pgque.register_consumer).
+//
+// Defaults — override with the matching ConsumerOption:
+//
+//   - poll interval: 30s   (WithPollInterval)
+//   - max messages:  MaxInt32 (WithMaxMessages; drains the whole batch by default)
+//   - unknown type:  Nack  (WithUnknownHandlerPolicy)
+func (c *Client) NewConsumer(queue, name string, opts ...ConsumerOption) *Consumer {
 	consumer := &Consumer{
-		client:       c,
-		queue:        queue,
-		name:         name,
-		pollInterval: 30 * time.Second,
-		handlers:     make(map[string]HandlerFunc),
+		backend:       c,
+		queue:         queue,
+		name:          name,
+		pollInterval:  30 * time.Second,
+		maxMessages:   math.MaxInt32,
+		handlers:      make(map[string]HandlerFunc),
+		unknownPolicy: NackUnknown,
 	}
 	for _, opt := range opts {
 		opt(consumer)
