@@ -127,6 +127,13 @@ Oban Pro shipped table partitioning to mitigate it; PGMQ ships aggressive autova
 
 **Requirements:** Postgres 14+, and something that calls `pgque.ticker()` periodically (every 1 second by default). `pg_cron` is the recommended default — pre-installed or one-command available on all major managed Postgres providers (RDS, Aurora, Cloud SQL, AlloyDB, Supabase, Neon); on self-managed Postgres, follow the [pg_cron setup guide](https://github.com/citusdata/pg_cron#setting-up-pg_cron). Any external scheduler (system `cron`, systemd, a worker loop in your app) works as an alternative — see below.
 
+Get the source — `\i sql/pgque.sql` resolves relative to the cwd, so run psql from the repo root:
+
+```bash
+git clone https://github.com/NikolayS/pgque
+cd pgque
+```
+
 Inside a psql session:
 
 ```sql
@@ -154,9 +161,9 @@ select pgque.start();
 Without `pg_cron`, PgQue still installs. Drive ticking and maintenance from your application or an external scheduler:
 
 ```bash
-PAGER=cat psql --no-psqlrc -c "select pgque.ticker()"              # every 1 second
-PAGER=cat psql --no-psqlrc -c "select pgque.maint_retry_events()"  # every 30 seconds
-PAGER=cat psql --no-psqlrc -c "select pgque.maint()"               # every 30 seconds
+PAGER=cat psql --no-psqlrc -d mydb -c "select pgque.ticker()"              # every 1 second
+PAGER=cat psql --no-psqlrc -d mydb -c "select pgque.maint_retry_events()"  # every 30 seconds
+PAGER=cat psql --no-psqlrc -d mydb -c "select pgque.maint()"               # every 30 seconds
 ```
 
 **Important:** PgQue does not deliver messages without a working ticker. Enqueueing still works, but consumers will see nothing new because no ticks are created. If you do not use `pg_cron`, run `pgque.ticker()`, `pgque.maint_retry_events()`, and `pgque.maint()` yourself. Skipping `maint_retry_events()` means nack'd events will never be redelivered.
@@ -172,7 +179,7 @@ PgQue mirrors upstream PgQ's split: `pgque_reader` (consume) and `pgque_writer` 
 | Role | Purpose | Granted access |
 |---|---|---|
 | `pgque_reader` | Consumers, dashboards, metrics, debugging | Read-only info (`get_queue_info`, `get_consumer_info`, `get_batch_info`, `version`, `select` on all tables) **and** the consume API (`subscribe`, `unsubscribe`, `receive`, `ack`, `nack`) plus the underlying PgQ primitives (`next_batch*`, `get_batch_events`, `finish_batch`, `event_retry`, `register_consumer*`, `unregister_consumer`). |
-| `pgque_writer` | Producers | The produce API (`send`, `send_batch`) and the underlying primitive (`insert_event`). Does **not** inherit `pgque_reader` — a producer-only role cannot ack/finish/inspect consumer batches (refs #102, #106). |
+| `pgque_writer` | Producers | The produce API (`send`, `send_batch`) and the underlying primitive (`insert_event`). Does **not** inherit `pgque_reader` — a producer-only role cannot ack/finish/inspect consumer batches. |
 | `pgque_admin`  | Operators, migrations | Member of both `pgque_reader` and `pgque_writer`, plus full schema/table/sequence access. `uninstall()` is revoked from both `pgque_admin` and PUBLIC (superuser-only — it drops the schema). |
 
 Typical app setup:
@@ -194,32 +201,6 @@ grant pgque_writer to app_webhook;
 create user metrics with password '...';              -- replace with a real password
 grant pgque_reader to metrics;
 ```
-
-**Upgrading from a pre-#163 install.** Pre-#163 PgQue granted `pgque_reader` to `pgque_writer` (writer inherited reader). #163 reverses that: the two are now siblings. **Existing deployments must take two manual steps after re-running `\i sql/pgque.sql`:**
-
-1. The re-install **does** revoke the old `pgque_reader → pgque_writer` membership for you (idempotent `revoke` in `roles.sql`). No action needed for that part.
-2. Any application role that previously held `pgque_writer` and called `receive`/`ack`/`nack`/`subscribe`/`unsubscribe` will start failing with `permission denied`. Grant `pgque_reader` to those roles:
-
-```sql
--- Apps that produce AND consume:
-grant pgque_reader to app_orders;
--- (pgque_writer is already granted; nothing to revoke from it.)
-```
-
-If you previously assumed a single role for both, audit which apps still need it:
-
-```sql
--- Find roles holding pgque_writer that are missing pgque_reader.
--- (pgque_writer/postgres are excluded as obvious self-matches; pgque_admin
--- is filtered transitively by the second predicate since it is a member of
--- pgque_reader.)
-select rolname from pg_roles
- where pg_has_role(rolname, 'pgque_writer', 'MEMBER')
-   and not pg_has_role(rolname, 'pgque_reader', 'MEMBER')
-   and rolname not in ('pgque_writer','postgres');
-```
-
-Then `grant pgque_reader to <each_role>;` per the audit. Pure producers (e.g. webhook ingesters that only `send()`) need no change.
 
 DDL-class operations (`create_queue`, `drop_queue`, `start`, `stop`, `maint`, `maint_retry_events`, `ticker`, `force_tick`, `set_queue_config`) are not granted to either `pgque_reader` or `pgque_writer`. The schema-wide blanket `revoke execute … from public` strips PUBLIC, and `pgque_admin` is the only role that retains `execute` on these helpers — perform them as an admin / migration role.
 
@@ -251,19 +232,32 @@ select pgque.subscribe('orders', 'processor');
 select pgque.send('orders', '{"order_id": 42, "total": 99.95}'::jsonb);
 
 -- tx 3: advance the queue if you are not using pg_cron
--- (force_tick bumps the event-seq threshold; ticker() then inserts the tick)
+-- force_tick bumps the event-seq threshold; ticker() then inserts the tick.
+-- Each select below is its own implicit transaction in psql autocommit —
+-- do NOT wrap these in begin/commit (the tick must see the send committed).
 select pgque.force_tick('orders');
 select pgque.ticker();
 
--- tx 4: receive (all returned rows share the same batch_id)
-create temp table msgs as
-  select * from pgque.receive('orders', 'processor', 100);
+-- tx 4: receive — every returned row carries the same batch_id
+select * from pgque.receive('orders', 'processor', 100);
+--  msg_id | batch_id |  type   |             payload              | retry_count | ...
+-- --------+----------+---------+----------------------------------+-------------+----
+--       1 |        1 | default | {"total": 99.95, "order_id": 42} |             |
+-- (jsonb sorts object keys by length then alphabetically, so the input
+--  '{"order_id": 42, "total": 99.95}' comes back with "total" first)
 
--- tx 5: acknowledge — pull the batch_id from any returned row
-select pgque.ack((select batch_id from msgs limit 1));
+-- tx 5: ack the batch_id from the previous result
+select pgque.ack(1);
 ```
 
-Send, tick, and receive should be separate transactions — that's PgQ's snapshot-based design working as intended. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_tick()` is mainly for demos, tests, and manual operation. The temp-table capture above is the safe psql pattern when `receive` returns more than one row; for application code, store the `batch_id` from any returned row.
+Send, tick, and receive **must** run in separate transactions — that's a hard requirement of PgQ's snapshot-based design, not a recommendation. A `tick` records a snapshot of committed transaction IDs; a `send` in the same xact is still in-progress at that moment and gets excluded from the next batch's visibility window, so the event never surfaces. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_tick()` is mainly for demos, tests, and manual operation. In application code, capture `batch_id` from any returned row and pass it to `ack`.
+
+The scriptable psql idiom (replaces tx 4 + tx 5 above):
+
+```sql
+select batch_id from pgque.receive('orders', 'processor', 100) limit 1 \gset
+select pgque.ack(:batch_id);
+```
 
 Longer walkthrough in the [tutorial](docs/tutorial.md); patterns like fan-out, exactly-once, and recurring jobs in [examples](docs/examples.md).
 
@@ -319,22 +313,27 @@ if (messages.length > 0) await client.ack(messages[0].batch_id);
 ```sql
 select pgque.send('orders', '{"order_id": 42}'::jsonb);
 
--- receive returns rows; each row carries the batch_id
-create temp table msgs as
-  select * from pgque.receive('orders', 'processor', 100);
+-- without pg_cron, advance the queue manually (omit if a ticker is running).
+-- Run as separate transactions — do not wrap in begin/commit.
+select pgque.force_tick('orders');
+select pgque.ticker();
 
--- ack uses the batch_id from any row (all rows share the same batch_id)
-select pgque.ack((select batch_id from msgs limit 1));
+-- receive returns rows; every row carries the same batch_id
+select * from pgque.receive('orders', 'processor', 100);
+
+-- ack the batch_id from any returned row (capture it in the driver)
+select pgque.ack(1);  -- replace with the batch_id from above
 ```
 
 ## Benchmarks
 
-Preliminary laptop numbers: ~86k ev/s PL/pgSQL insert, ~2.4M ev/s primitive
-batch read rate (`get_batch_events`), zero dead-tuple growth under a 30-minute
-sustained test. The batch read figure reflects raw PgQ primitive throughput,
-not end-to-end `receive()`/`ack()` consumer throughput. See
+Preliminary laptop numbers: ~86k ev/s batched PL/pgSQL insert, ~2.4M ev/s
+primitive batch read rate (`get_batch_events`), zero dead-tuple growth under a
+30-minute sustained test with a blocked xmin horizon (a concurrent long-running
+transaction holding an assigned XID — the worst case for SKIP LOCKED queues).
+The batch read figure reflects raw PgQ primitive throughput, not end-to-end
+`receive()`/`ack()` consumer throughput. See
 [docs/benchmarks.md](docs/benchmarks.md) for the full table and methodology.
-Server-class numbers to follow.
 
 Preliminary cross-system measurements live in [`benchmark/`](benchmark/).
 Numbers there are for reference and exploration, not a final verdict —
