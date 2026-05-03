@@ -5,11 +5,11 @@
 """Consumer -- event-driven message consumer with LISTEN/NOTIFY support."""
 
 import logging
-import signal
 import select
+import signal
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 import psycopg
 from psycopg import sql
@@ -20,8 +20,10 @@ from .types import Message
 logger = logging.getLogger("pgque")
 
 # Maximum time the LISTEN wait blocks before re-checking the stop flag.
-# Bounds shutdown latency to roughly this many seconds. See issue #158.
+# Bounds shutdown latency to roughly this many seconds.
 _WAIT_SLICE_SECONDS = 0.5
+# PostgreSQL int4 max; request the whole batch by default.
+_DEFAULT_MAX_MESSAGES = 2_147_483_647
 
 
 class Consumer:
@@ -47,9 +49,10 @@ class Consumer:
         - If the handler raises an exception, the message is nacked
           with the default retry_after.
         - If no handler is registered for a message type (and no
-          default ``"*"`` handler exists), a WARNING is logged and the
-          message is acked. Register a handler for that type or use a
-          ``"*"`` catch-all to handle it deliberately.
+          default ``"*"`` handler exists), the message is nacked
+          (sent to retry_queue, or to the dead-letter queue once
+          ``queue_max_retries`` is exhausted). To ack unknown types
+          instead, pass ``unknown_handler="ack"``.
 
     After all messages in a batch have been dispatched, the batch is
     acked automatically.
@@ -62,8 +65,9 @@ class Consumer:
         queue: str,
         name: str,
         poll_interval: int = 30,
-        max_messages: int = 100,
+        max_messages: int = _DEFAULT_MAX_MESSAGES,
         retry_after: int = 60,
+        unknown_handler: Literal["nack", "ack"] = "nack",
     ):
         self.dsn = dsn
         self.queue = queue
@@ -71,6 +75,12 @@ class Consumer:
         self.poll_interval = poll_interval
         self.max_messages = max_messages
         self.retry_after = retry_after
+        if unknown_handler not in ("nack", "ack"):
+            raise ValueError(
+                "unknown_handler must be 'nack' or 'ack', "
+                f"got {unknown_handler!r}"
+            )
+        self._unknown_handler = unknown_handler
 
         self._handlers: dict[str, Callable] = {}
         self._default_handler: Optional[Callable] = None
@@ -142,8 +152,8 @@ class Consumer:
                     # Wait for NOTIFY or poll_interval timeout in short
                     # bounded slices. psycopg's conn.notifies() can
                     # block uninterruptibly for the full timeout, which
-                    # makes stop() slow and can miss prompt wakeups
-                    # (issue #158). Polling the underlying socket with
+                    # makes stop() slow and can miss prompt wakeups.
+                    # Polling the underlying socket with
                     # select() lets us re-check _running every SLICE
                     # seconds and drain any pending NOTIFY immediately.
                     self._wait_for_notify_or_stop(conn)
@@ -168,7 +178,7 @@ class Consumer:
           * ``poll_interval`` elapses cumulatively.
 
         Each slice is at most ``_WAIT_SLICE_SECONDS`` so ``stop()`` is
-        observed within ~SLICE seconds of the call. Issue #158.
+        observed within ~SLICE seconds of the call.
         """
         # Drain any NOTIFY already buffered in libpq from the prior
         # _poll_once (e.g. delivered alongside query results). Without
@@ -205,7 +215,14 @@ class Consumer:
                 return
 
     def _poll_once(self, conn: psycopg.Connection) -> None:
-        """Receive one batch and dispatch messages."""
+        """Receive one batch and dispatch messages.
+
+        If any per-message ``nack()`` raises, the batch is NOT acked --
+        the receive transaction commits without finishing the batch, so
+        PgQ redelivers the same batch on the next poll. Without this
+        guard, swallowing a nack failure and then acking would advance
+        past the batch and silently drop the failed message.
+        """
         # Use a transaction block for receive + ack
         with conn.transaction():
             client = PgqueClient(conn)
@@ -221,14 +238,38 @@ class Consumer:
                 "batch %d: %d message(s)", batch_id, len(msgs)
             )
 
+            nack_failed = False
+
             for msg in msgs:
                 handler = self._handlers.get(msg.type, self._default_handler)
                 if handler is None:
+                    if self._unknown_handler == "ack":
+                        self._log.warning(
+                            "no handler for event type=%s ev_id=%s; acking",
+                            msg.type,
+                            msg.msg_id,
+                        )
+                        continue
                     self._log.warning(
-                        "no handler for event type=%s ev_id=%s; acking",
+                        "no handler for event type=%s ev_id=%s; nacking",
                         msg.type,
                         msg.msg_id,
                     )
+                    try:
+                        client.nack(
+                            batch_id,
+                            msg,
+                            retry_after=self.retry_after,
+                            reason=f"no handler for type={msg.type}",
+                        )
+                    except Exception:
+                        nack_failed = True
+                        logger.exception(
+                            "nack failed for unhandled msg_id=%d; "
+                            "skipping batch ack so PgQ redelivers",
+                            msg.msg_id,
+                        )
+                        break
                     continue
 
                 try:
@@ -238,8 +279,21 @@ class Consumer:
                         "handler failed for msg_id=%d, nacking",
                         msg.msg_id,
                     )
-                    client.nack(
-                        batch_id, msg, retry_after=self.retry_after
-                    )
+                    try:
+                        client.nack(
+                            batch_id, msg, retry_after=self.retry_after
+                        )
+                    except Exception:
+                        nack_failed = True
+                        logger.exception(
+                            "nack failed for msg_id=%d; "
+                            "skipping batch ack so PgQ redelivers",
+                            msg.msg_id,
+                        )
+                        break
+
+            if nack_failed:
+                # Do NOT ack -- redeliver on next poll.
+                return
 
             client.ack(batch_id)
