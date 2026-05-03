@@ -287,18 +287,27 @@ Longer walkthrough in the [tutorial](docs/tutorial.md); patterns like fan-out, e
 
 ## Client libraries
 
-PgQue is SQL-first, so any Postgres driver works. Example client libraries exist for **Python**, **Go**, and **TypeScript** — unpublished, still evolving, demonstrating integration patterns rather than stable SDKs. **Contributions welcome.**
+PgQue is SQL-first, so any Postgres driver works. First-party client libraries live in this repo for **Python**, **Go**, and **TypeScript**. The install commands below apply after the first client packages are published.
 
 ### Python (`pgque-py`) — psycopg 3
 
+```bash
+# after the first Python client release
+pip install pgque-py
+```
+
 ```python
-from pgque import PgqueClient, Consumer
+from pgque import Consumer, connect
 
-client = PgqueClient(conn)
-# type= must match the event type the consumer listens on
-client.send("orders", {"order_id": 42}, type="order.created")
+with connect("postgresql://localhost/mydb") as client:
+    client.send("orders", {"order_id": 42}, type="order.created")
+    client.conn.commit()
 
-consumer = Consumer(dsn, queue="orders", name="processor", poll_interval=30)
+consumer = Consumer(
+    "postgresql://localhost/mydb",
+    queue="orders",
+    name="processor",
+)
 
 @consumer.on("order.created")
 def handle_order(msg):
@@ -307,10 +316,21 @@ def handle_order(msg):
 consumer.start()
 ```
 
-### Go (`pgque-go`) — pgx/v5
+### Go (`github.com/NikolayS/pgque-go`) — pgx/v5
+
+```bash
+# after the first Go client release
+go get github.com/NikolayS/pgque-go@latest
+```
 
 ```go
 client, _ := pgque.Connect(ctx, "postgresql://localhost/mydb")
+defer client.Close()
+
+_, _ = client.Send(ctx, "orders", pgque.Event{
+    Type:    "order.created",
+    Payload: map[string]any{"order_id": 42},
+})
 
 consumer := client.NewConsumer("orders", "processor")
 consumer.Handle("order.created", func(ctx context.Context, msg pgque.Message) error {
@@ -319,17 +339,29 @@ consumer.Handle("order.created", func(ctx context.Context, msg pgque.Message) er
 consumer.Start(ctx)
 ```
 
-### TypeScript (`pgque-ts`) — node-postgres
+### TypeScript (`pgque`) — node-postgres
+
+```bash
+# after the first TypeScript client release
+npm install pgque
+```
 
 ```ts
-const client = new PgqueClient('postgresql://localhost/mydb');
-await client.connect();
+import { connect } from 'pgque';
 
-await client.send('orders', { order_id: 42 }, 'order.created');
-await client.subscribe('orders', 'processor');
+const client = await connect('postgresql://localhost/mydb');
+try {
+  await client.send('orders', {
+    type: 'order.created',
+    payload: { order_id: 42 },
+  });
+  await client.subscribe('orders', 'processor');
 
-const messages = await client.receive('orders', 'processor', 100);
-if (messages.length > 0) await client.ack(messages[0].batch_id);
+  const messages = await client.receive('orders', 'processor', 100);
+  if (messages.length > 0) await client.ack(messages[0]!.batchId);
+} finally {
+  await client.close();
+}
 ```
 
 ### Any language

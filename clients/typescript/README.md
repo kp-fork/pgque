@@ -7,8 +7,8 @@ PgQ-based universal PostgreSQL queue. Thin, idiomatic wrapper over the
 
 ## Install
 
-For application code, install the published package with any npm-compatible
-package manager:
+After the first TypeScript client release, install the published package with
+any npm-compatible package manager:
 
 ```bash
 npm install pgque
@@ -161,6 +161,13 @@ PGQUE_TEST_DSN=postgresql://postgres:pgque_test@localhost/pgque_test \
 ```
 
 Without `PGQUE_TEST_DSN` the integration tests skip.
+
+## Distribution
+
+The npm package is `pgque`. It publishes ESM JavaScript and TypeScript
+declarations from `dist/`, built from the Bun-managed source tree.
+
+See [RELEASE.md](RELEASE.md) for publishing steps.
 
 ## License
 

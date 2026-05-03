@@ -6,8 +6,10 @@ universal PostgreSQL queue. A thin, idiomatic wrapper over the
 
 ## Install
 
+After the first Go client release:
+
 ```bash
-go get github.com/NikolayS/pgque/clients/go
+go get github.com/NikolayS/pgque-go@latest
 ```
 
 Requires Go 1.21+ and PostgreSQL 14+ with the PgQue schema installed
@@ -22,7 +24,7 @@ import (
     "context"
     "log"
 
-    pgque "github.com/NikolayS/pgque/clients/go"
+    pgque "github.com/NikolayS/pgque-go"
 )
 
 func main() {
@@ -111,6 +113,15 @@ PGQUE_TEST_DSN=postgres://postgres:pgque_test@localhost/pgque_test \
 ```
 
 Without `PGQUE_TEST_DSN`, the tests skip.
+
+## Distribution
+
+This client is published as the Go module
+`github.com/NikolayS/pgque-go`. Source lives in this monorepo under
+`clients/go`; releases sync that subtree to the mirror repository and use
+normal Go module tags such as `vX.Y.Z`.
+
+See [RELEASE.md](RELEASE.md) for publishing steps.
 
 ## More
 
