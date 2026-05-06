@@ -115,5 +115,17 @@
 \echo 'Running: test_e2e_role_split'
 \i tests/test_e2e_role_split.sql
 
+\echo 'Running: test_cooperative_consumers'
+\i tests/test_cooperative_consumers.sql
+
+\echo 'Running: test_receive_coop_contracts'
+\i tests/test_receive_coop_contracts.sql
+
+\echo 'Running: test_coop_ultrareview'
+\i tests/test_coop_ultrareview.sql
+
+\echo 'Running: test_coop_concurrency'
+\i tests/test_coop_concurrency.sql
+
 \echo ''
 \echo '=== ALL TESTS PASSED ==='
