@@ -228,10 +228,20 @@ module Pgque
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
+    # The default logger is effectively silent: it targets $stderr (so
+    # messages never collide with application stdout) and ships at level
+    # FATAL, which the consumer never emits. Set PGQUE_LOG_LEVEL=warn (or
+    # info, debug, error) to see warnings/info from the consumer, or
+    # pass logger: Logger.new(...) to Consumer.new for full control.
     def default_logger
-      log = Logger.new($stdout)
+      log = Logger.new($stderr)
       log.progname = "pgque.consumer.#{@name}"
-      log.level = ENV["PGQUE_LOG_LEVEL"] ? Logger.const_get(ENV["PGQUE_LOG_LEVEL"].upcase) : Logger::WARN
+      log.level =
+        if ENV["PGQUE_LOG_LEVEL"]
+          Logger.const_get(ENV["PGQUE_LOG_LEVEL"].upcase)
+        else
+          Logger::FATAL
+        end
       log
     end
   end
