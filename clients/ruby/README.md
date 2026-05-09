@@ -1,0 +1,52 @@
+# pgque
+
+Ruby client for [PgQue](https://github.com/NikolayS/pgque) — the PgQ-based
+universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
+`send`, `receive`, `ack`, `nack`, `force_next_tick`, plus a polling
+`Consumer` with `LISTEN`/`NOTIFY` wakeup.
+
+## Install
+
+```bash
+gem install pgque --pre
+```
+
+`--pre` is required while v0.2.0 is in release-candidate; the latest
+published version is `0.2.0.rc.1`. Pin the exact version if you prefer:
+
+```ruby
+gem "pgque", "0.2.0.rc.1"
+```
+
+Requires Ruby 3.1+ and PostgreSQL 14+ with the PgQue schema installed
+(`\i pgque.sql` — no extension required).
+
+## Database permissions
+
+The connecting database role needs `pgque_reader` to consume (`receive`,
+`ack`, `nack`) and `pgque_writer` to produce (`send`, `send_batch`). The
+two are **siblings** — neither inherits the other. An app that both
+produces and consumes must be granted **both** roles:
+
+```sql
+grant pgque_reader to your_app_user;
+grant pgque_writer to your_app_user;
+```
+
+See [`docs/reference.md` — Roles and grants](../../docs/reference.md#roles-and-grants).
+
+## Tests
+
+Integration tests require a running PostgreSQL with the PgQue schema
+installed. Set `PGQUE_TEST_DSN` and run rake:
+
+```bash
+PGQUE_TEST_DSN=postgresql://postgres:pgque_test@localhost/pgque_test \
+    bundle exec rake test
+```
+
+Without `PGQUE_TEST_DSN`, the tests skip.
+
+## License
+
+Apache-2.0. Copyright 2026 Nikolay Samokhvalov.

@@ -1,0 +1,25 @@
+# Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
+# PgQue includes code derived from PgQ (ISC license,
+# Marko Kreen / Skype Technologies OU).
+
+module Pgque
+  class Client
+    attr_reader :conn
+
+    def self.connect(dsn, autocommit: false)
+      conn = PG.connect(dsn)
+      new(conn, owns_conn: true)
+    end
+
+    def initialize(conn, owns_conn: false)
+      @conn = conn
+      @owns_conn = owns_conn
+    end
+
+    def close
+      return unless @owns_conn
+      return if @conn.finished?
+      @conn.close
+    end
+  end
+end
