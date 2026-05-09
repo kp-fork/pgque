@@ -21,4 +21,13 @@ class TestSend < Minitest::Test
       assert_kind_of Integer, eid
     end
   end
+
+  def test_send_event_object
+    with_queue do |queue, _consumer, conn|
+      client = Pgque::Client.new(conn)
+      event = Pgque::Event.new(payload: { "x" => 1 }, type: "custom.t")
+      eid = client.send(queue, event)
+      assert_kind_of Integer, eid
+    end
+  end
 end

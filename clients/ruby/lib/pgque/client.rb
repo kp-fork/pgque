@@ -30,6 +30,10 @@ module Pgque
     end
 
     def send(queue, payload, type: "default")
+      if payload.is_a?(Event)
+        type = payload.type
+        payload = payload.payload
+      end
       encoded = encode_payload(payload)
       result =
         if type && type != "" && type != "default"

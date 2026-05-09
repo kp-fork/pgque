@@ -7,6 +7,7 @@ require "pg"
 
 require "pgque/version"
 require "pgque/errors"
+require "pgque/event"
 require "pgque/client"
 
 module Pgque
