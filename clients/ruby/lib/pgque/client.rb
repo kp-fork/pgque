@@ -28,5 +28,23 @@ module Pgque
       return if @conn.finished?
       @conn.close
     end
+
+    def send(queue, payload)
+      result = @conn.exec_params(
+        "select pgque.send($1, $2::jsonb)",
+        [queue, encode_payload(payload)],
+      )
+      result.values[0][0].to_i
+    end
+
+    private
+
+    def encode_payload(payload)
+      case payload
+      when Hash, Array then JSON.dump(payload)
+      when nil         then "null"
+      else                  payload
+      end
+    end
   end
 end

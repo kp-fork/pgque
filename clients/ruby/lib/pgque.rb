@@ -2,6 +2,7 @@
 # PgQue includes code derived from PgQ (ISC license,
 # Marko Kreen / Skype Technologies OU).
 
+require "json"
 require "pg"
 
 require "pgque/version"
