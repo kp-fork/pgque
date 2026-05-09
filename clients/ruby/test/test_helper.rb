@@ -36,6 +36,13 @@ module PgqueTest
       yield q, c, conn
     ensure
       if conn && !conn.finished?
+        # Reset the connection's transaction state before cleaning up.
+        # If the test body left the conn in a failed transaction (an
+        # in-flight assertion failure after a SQL error, for example)
+        # any subsequent query is rejected until the transaction is
+        # rolled back -- which would silently break drop_queue and leak
+        # the test queue across runs.
+        conn.exec("ROLLBACK") rescue nil
         begin
           conn.exec_params("select pgque.unregister_consumer($1, $2)", [q, c]) if q && c
           conn.exec_params("select pgque.drop_queue($1, true)", [q]) if q
