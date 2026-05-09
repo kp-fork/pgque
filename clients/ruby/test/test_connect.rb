@@ -33,15 +33,6 @@ class TestConnect < Minitest::Test
     end
   end
 
-  def test_autocommit_flag
-    Pgque.connect(dsn, autocommit: true) do |client|
-      assert client.autocommit?
-    end
-    Pgque.connect(dsn) do |client|
-      refute client.autocommit?
-    end
-  end
-
   def test_close_is_idempotent
     client = Pgque.connect(dsn)
     client.close

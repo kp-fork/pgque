@@ -100,8 +100,12 @@ class TestCoop < Minitest::Test
         producer.conn.exec_params("select pgque.ticker($1)", [q])
       end
 
-      Pgque.connect(dsn, autocommit: true) do |c1|
-        Pgque.connect(dsn, autocommit: true) do |c2|
+      # Ruby pg runs each exec_params as its own implicit transaction, so
+      # the FOR UPDATE lock taken by receive_coop drops as soon as the
+      # call returns -- no autocommit flag needed (cf. psycopg's
+      # autocommit=True in the Python equivalent test).
+      Pgque.connect(dsn) do |c1|
+        Pgque.connect(dsn) do |c2|
           m1 = c1.receive_coop(q, consumer_n, "worker-1", max_messages: 100)
           m2 = c2.receive_coop(q, consumer_n, "worker-2", max_messages: 100)
 

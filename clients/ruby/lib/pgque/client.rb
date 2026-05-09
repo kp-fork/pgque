@@ -12,21 +12,16 @@ module Pgque
   class Client
     attr_reader :conn
 
-    def self.connect(dsn, autocommit: false)
+    def self.connect(dsn)
       conn = PG.connect(dsn)
-      new(conn, owns_conn: true, autocommit: autocommit)
+      new(conn, owns_conn: true)
     rescue PG::ConnectionBad => e
       raise ConnectionError, e.message
     end
 
-    def initialize(conn, owns_conn: false, autocommit: false)
+    def initialize(conn, owns_conn: false)
       @conn = conn
       @owns_conn = owns_conn
-      @autocommit = autocommit
-    end
-
-    def autocommit?
-      @autocommit
     end
 
     def close
