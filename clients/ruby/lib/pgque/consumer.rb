@@ -236,13 +236,20 @@ module Pgque
     def default_logger
       log = Logger.new($stderr)
       log.progname = "pgque.consumer.#{@name}"
-      log.level =
-        if ENV["PGQUE_LOG_LEVEL"]
-          Logger.const_get(ENV["PGQUE_LOG_LEVEL"].upcase)
-        else
-          Logger::FATAL
-        end
+      log.level = env_log_level || Logger::FATAL
       log
+    end
+
+    def env_log_level
+      raw = ENV["PGQUE_LOG_LEVEL"]
+      return nil if raw.nil?
+
+      normalized = raw.strip.upcase
+      return nil if normalized.empty?
+
+      Logger.const_get(normalized)
+    rescue NameError
+      nil
     end
   end
 end

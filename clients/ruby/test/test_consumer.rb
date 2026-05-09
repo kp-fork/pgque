@@ -76,6 +76,17 @@ class TestConsumerUnit < Minitest::Test
     end
   end
 
+  def test_invalid_pgque_log_level_falls_back_to_fatal
+    skip_dsn_for_this_class!
+    old = ENV["PGQUE_LOG_LEVEL"]
+    ENV["PGQUE_LOG_LEVEL"] = " warning "
+
+    cons = Pgque::Consumer.new("dummy", queue: "q", name: "c")
+    assert_equal Logger::FATAL, cons.logger.level
+  ensure
+    ENV["PGQUE_LOG_LEVEL"] = old
+  end
+
   private
 
   # Some unit tests don't actually connect; allow them even without DSN.
