@@ -13,4 +13,12 @@ class TestSend < Minitest::Test
       assert_operator eid, :>, 0
     end
   end
+
+  def test_send_with_explicit_type
+    with_queue do |queue, _consumer, conn|
+      client = Pgque::Client.new(conn)
+      eid = client.send(queue, { "id" => 1 }, type: "order.created")
+      assert_kind_of Integer, eid
+    end
+  end
 end

@@ -29,11 +29,20 @@ module Pgque
       @conn.close
     end
 
-    def send(queue, payload)
-      result = @conn.exec_params(
-        "select pgque.send($1, $2::jsonb)",
-        [queue, encode_payload(payload)],
-      )
+    def send(queue, payload, type: "default")
+      encoded = encode_payload(payload)
+      result =
+        if type && type != "" && type != "default"
+          @conn.exec_params(
+            "select pgque.send($1, $2, $3::jsonb)",
+            [queue, type, encoded],
+          )
+        else
+          @conn.exec_params(
+            "select pgque.send($1, $2::jsonb)",
+            [queue, encoded],
+          )
+        end
       result.values[0][0].to_i
     end
 
