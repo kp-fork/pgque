@@ -42,8 +42,14 @@ module Pgque
 
       @handlers = {}
       @default_handler = nil
-      @running_mutex = Mutex.new
+      # @running is a plain boolean. Ruby integer/boolean assignment
+      # is atomic, and the only cross-thread interactions are the
+      # signal trap and Consumer#stop flipping it false while the
+      # main loop polls running? -- no ordering dependencies, so a
+      # mutex would be overkill (and unsafe to enter from a signal
+      # trap, which raises ThreadError on Mutex#synchronize).
       @running = false
+      @stop_signum = nil
       @logger = logger || default_logger
     end
 
@@ -59,14 +65,19 @@ module Pgque
     end
 
     def start
-      self.running = true
+      @running = true
+      @stop_signum = nil
 
       in_main_thread = (Thread.current == Thread.main)
       original_handlers = {}
 
+      # Signal traps run in a restricted context: Mutex#synchronize,
+      # Logger#info, and most blocking code raise ThreadError. Keep
+      # this proc to plain instance-variable writes; the main loop
+      # logs the signal number after waking up.
       stop_proc = ->(signum) {
-        @logger.info("received signal #{signum}, shutting down")
-        self.running = false
+        @stop_signum = signum
+        @running = false
       }
 
       if in_main_thread
@@ -89,6 +100,10 @@ module Pgque
             break unless running?
             wait_for_notify_or_stop(conn)
           end
+
+          if @stop_signum
+            @logger.info("received signal #{@stop_signum}, shutting down")
+          end
         ensure
           conn.close unless conn.finished?
         end
@@ -101,11 +116,11 @@ module Pgque
     end
 
     def stop
-      self.running = false
+      @running = false
     end
 
     def running?
-      @running_mutex.synchronize { @running }
+      @running
     end
 
     # Public for testability; not part of the stable API.
@@ -218,10 +233,6 @@ module Pgque
           return
         end
       end
-    end
-
-    def running=(value)
-      @running_mutex.synchronize { @running = value }
     end
 
     def monotonic
