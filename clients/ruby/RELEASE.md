@@ -93,6 +93,29 @@ The workflow builds with `gem build`, smoke-installs the resulting
 Trusted Publishing / OIDC. No long-lived `RUBYGEMS_API_KEY` is
 needed.
 
+The publish step uses `rubygems/release-gem@v1`, which runs
+`bundle exec rake release`. That task (provided by
+`require "bundler/gem_tasks"` in `clients/ruby/Rakefile`) chains:
+
+1. `rake build` — builds `pgque-${VERSION}.gem` under `pkg/`.
+2. `release:guard_clean` — refuses to release if the working tree
+   has uncommitted changes (CI checkouts are clean).
+3. `release:source_control_push` — annotates the head commit with a
+   `v${VERSION}` tag and pushes that tag to `origin`. The
+   `contents: write` permission on the publish job, plus the
+   `GITHUB_TOKEN` automatically injected by `actions/checkout`, is
+   what authorizes the push. **The release workflow therefore
+   pushes a git tag to `NikolayS/pgque` as a side effect.** If you
+   need to retract a release, yank the gem on RubyGems *and* delete
+   the tag with `git push --delete origin v${VERSION}`.
+4. `release:rubygem_push` — `gem push pkg/pgque-${VERSION}.gem`.
+
+If the gem push fails after the tag has already been pushed (rare
+but possible if rubygems.org is degraded), you'll have a `v${VERSION}`
+tag with no corresponding published gem. Re-running the workflow
+will then fail at `release:guard_clean` if the tag already exists;
+delete the tag and re-dispatch.
+
 ## Why no test registry?
 
 Unlike PyPI's TestPyPI sibling, RubyGems.org has no public staging

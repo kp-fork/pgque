@@ -79,15 +79,28 @@ jobs:
     runs-on: ubuntu-latest
     environment: rubygems
     permissions:
-      contents: read
+      # contents:write is required so `rake release` (invoked by
+      # rubygems/release-gem) can push the v${VERSION} git tag back to
+      # origin. id-token:write is for the OIDC handshake with
+      # rubygems.org.
+      contents: write
       id-token: write
     defaults:
       run:
         working-directory: clients/ruby
     steps:
+      # Check out the branch ref (not the bare SHA) so we land on an
+      # attached HEAD; bundler's release:source_control_push runs plain
+      # `git push`, which fails from detached HEAD. The build job (run
+      # immediately before this one) already verified the version
+      # against the dispatch SHA, so any race with main moving during
+      # the workflow would have to land a new commit AND a version
+      # bump in that window -- vanishingly small.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.ref }}
+          # Full history so existing tags are visible to release:guard_clean.
+          fetch-depth: 0
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -95,10 +108,17 @@ jobs:
           working-directory: clients/ruby
           bundler-cache: true
 
-      # rubygems/release-gem builds the gem from the gemspec in
-      # working-directory and pushes via OIDC. setup-trusted-publisher
-      # exchanges the GitHub-issued JWT for a short-lived rubygems.org
-      # API key -- no long-lived RUBYGEMS_API_KEY secret is needed.
+      - name: Configure git identity for tag push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # rubygems/release-gem performs the OIDC handshake (no long-lived
+      # RUBYGEMS_API_KEY secret needed) and then runs
+      # `bundle exec rake release`, which depends on the gem tasks
+      # provided by `require "bundler/gem_tasks"` in clients/ruby/Rakefile.
+      # The chain is: build -> release:guard_clean -> release:source_control_push
+      # (tags v${VERSION} and pushes the tag) -> release:rubygem_push.
       - name: Publish to RubyGems via OIDC
         uses: rubygems/release-gem@v1
         with:
