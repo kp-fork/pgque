@@ -2,19 +2,18 @@
 
 TypeScript client for [PgQue](https://github.com/NikolayS/pgque) — the
 PgQ-based universal PostgreSQL queue. Thin, idiomatic wrapper over the
-`pgque-api` SQL functions: `send`, `receive`, `ack`, `nack` (plus
-`subscribe` / `unsubscribe`).
+`pgque-api` SQL functions: `send`, `send_batch`, `subscribe`,
+`unsubscribe`, `receive`, `ack`, `nack`, `ticker`, `ticker_all`, and
+`force_next_tick`.
 
 ## Install
 
 ```bash
-npm install pgque@rc
-# or: bun add pgque@rc
-# or: pnpm add pgque@rc
-# or: yarn add pgque@rc
+npm install pgque
+# or: bun add pgque
+# or: pnpm add pgque
+# or: yarn add pgque
 ```
-
-The `@rc` dist-tag points at the latest v0.2.0 release candidate (currently `0.2.0-rc.1`). Drop the tag once v0.2.0 ships.
 
 Runtime requirements: Node.js 20+ and PostgreSQL 14+ with the PgQue schema
 installed (`\i pgque.sql` — no extension required).
@@ -83,7 +82,7 @@ try {
 | `client.ticker(queue)` | Per-queue ticker; returns the new tick id (`bigint`) or `null` when no tick was needed. Wraps `pgque.ticker(queue text)`. |
 | `client.tickerAll()` | Global ticker across all eligible queues; returns count of queues ticked (`number`). Wraps `pgque.ticker()`. |
 | `client.forceNextTick(queue)` | Force the next `ticker(queue)` call to produce a tick; returns the last tick id (`bigint`) or `null` on a brand-new queue. Wraps `pgque.force_next_tick(queue text)`. |
-| `client.newConsumer(queue, name, opts?)` | High-level poll loop. |
+| `client.newConsumer(queue, name, opts?)` | High-level poll loop. Options include `pollInterval`, `maxMessages`, `retryAfter`, and `unknownHandlerPolicy`. |
 | `consumer.handle(eventType, fn)` | Register a handler. |
 | `consumer.start(signal?)` | Run; resolves when `AbortSignal` aborts. |
 | `client.close()` | Drain the pool. |
@@ -150,6 +149,7 @@ All errors derive from `PgqueError`:
 - `PgqueConnectionError` — connect failure
 - `PgqueQueueNotFoundError` — caller forgot `pgque.create_queue`
 - `PgqueConsumerNotFoundError` — consumer not subscribed
+- `PgqueBatchNotFoundError` — batch is stale, missing, or already finished
 - `PgqueSqlError` — generic SQL failure (with `cause`)
 
 ## Caveats

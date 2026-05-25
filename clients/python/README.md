@@ -2,19 +2,14 @@
 
 Python client for [PgQue](https://github.com/NikolayS/pgque) — the PgQ-based
 universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
-`send`, `receive`, `ack`, `nack`, `force_next_tick`, plus a polling
+`send`, `send_batch`, `subscribe`, `unsubscribe`, `receive`, `ack`,
+`nack`, `ticker`, `ticker_all`, `force_next_tick`, plus a polling
 `Consumer` with `LISTEN`/`NOTIFY` wakeup.
 
 ## Install
 
 ```bash
-pip install --pre pgque-py
-```
-
-`--pre` is required while v0.2.0 is in release-candidate (the latest published version is `0.2.0rc1`); pip skips prereleases by default. Pin the exact version if you prefer:
-
-```bash
-pip install "pgque-py==0.2.0rc1"
+pip install pgque-py
 ```
 
 Requires Python 3.10+ and PostgreSQL 14+ with the PgQue schema installed
@@ -38,7 +33,7 @@ import pgque
 
 with pgque.connect("postgresql://localhost/mydb") as client:
     # one-time setup (typically in a migration)
-    client.conn.execute("select pgque.subscribe('orders', 'order_worker')")
+    client.subscribe("orders", "order_worker")
     client.conn.commit()
 
     # producer: commit once to publish both calls atomically
@@ -167,12 +162,12 @@ database with `PGQUE_TEST_DSN` set.
 ## Manual ticking
 
 For tests, demos, or manual operation without `pg_cron`, use
-`client.force_next_tick(queue)` to force the **next** `pgque.ticker()` call to
+`client.force_next_tick(queue)` to force the **next** ticker call to
 materialize a tick. It does not insert the tick itself:
 
 ```python
 client.force_next_tick("orders")
-client.conn.execute("select pgque.ticker()")
+client.ticker("orders")
 client.conn.commit()
 ```
 

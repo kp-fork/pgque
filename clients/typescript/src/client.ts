@@ -4,7 +4,9 @@
 import pg from 'pg';
 import { Consumer } from './consumer.js';
 import {
+  PgqueBatchNotFoundError,
   PgqueConnectionError,
+  PgqueConsumerNotFoundError,
   PgqueError,
   PgqueQueueNotFoundError,
   PgqueSqlError,
@@ -38,16 +40,6 @@ export const pgqueTypes: pg.CustomTypesConfig = {
     return types.getTypeParser(oid, format as 'text' | 'binary');
   },
 };
-
-const PG_RAISE_EXCEPTION_CODE = 'P0001';
-
-interface PgError extends Error {
-  code?: string;
-}
-
-function isPgError(e: unknown): e is PgError {
-  return e instanceof Error && typeof (e as PgError).code === 'string';
-}
 
 /** Internal: row shape returned by `pgque.receive` after type parsers run. */
 interface RawMessageRow {
@@ -186,7 +178,7 @@ export class Client {
       return result.rows.map(rowToMessage);
     } catch (err) {
       if (err instanceof PgqueError) throw err;
-      throw mapPgError('receive', err, { queue });
+      throw mapPgError('receive', err, { queue, consumer });
     }
   }
 
@@ -288,7 +280,7 @@ export class Client {
       );
     } catch (err) {
       if (err instanceof PgqueError) throw err;
-      throw mapPgError('nack', err);
+      throw mapPgError('nack', err, { batchId });
     }
   }
 
@@ -635,13 +627,41 @@ function serializePayload(payload: unknown): string {
   return encoded;
 }
 
-function mapPgError(op: string, err: unknown, ctx?: { queue?: string }): PgqueError {
-  if (!isPgError(err)) {
-    return new PgqueSqlError(op, { cause: err });
+function mapPgError(
+  op: string,
+  err: unknown,
+  ctx?: { queue?: string; consumer?: string; batchId?: bigint },
+): PgqueError {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message?: unknown }).message ?? '')
+        : String(err ?? '');
+  if (/(queue not found|no such queue|no such event queue|event queue not found|event queue not created)/i.test(msg)) {
+    return new PgqueQueueNotFoundError(ctx?.queue ?? '', { cause: err });
   }
-  const msg = err.message ?? '';
-  if (err.code === PG_RAISE_EXCEPTION_CODE && /queue not found/i.test(msg) && ctx?.queue) {
-    return new PgqueQueueNotFoundError(ctx.queue, { cause: err });
+  if (/(consumer (not registered|not found)|not subscrib(?:ed|er))/i.test(msg)) {
+    return new PgqueConsumerNotFoundError(ctx?.queue ?? '', ctx?.consumer ?? '', { cause: err });
+  }
+  if (/(batch not found|cannot find data for batch)/i.test(msg)) {
+    return new PgqueBatchNotFoundError(ctx?.batchId, { cause: err });
+  }
+  if (isConnectionError(err, msg)) {
+    return new PgqueConnectionError(`pgque: ${op}: ${msg}`, { cause: err });
   }
   return new PgqueSqlError(op, { cause: err });
+}
+
+function isConnectionError(err: unknown, msg: string): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code ?? '')
+      : '';
+  return (
+    /^(ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)$/i.test(code) ||
+    /(connection terminated|connection closed|pool has ended|pool after calling end|connection timeout|timeout expired|terminating connection|server closed the connection)/i.test(
+      msg,
+    )
+  );
 }

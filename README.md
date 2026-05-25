@@ -30,6 +30,7 @@ Discussion on [Hacker News](https://news.ycombinator.com/item?id=47817349).
 - [Quick start](#quick-start)
 - [Client libraries](#client-libraries)
 - [Benchmarks](#benchmarks)
+- [Subconsumers / cooperative consumers](#subconsumers--cooperative-consumers)
 - [Architecture](#architecture)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -98,7 +99,7 @@ See [docs/three-latencies.md](docs/three-latencies.md) for the breakdown, tick-c
 | No external daemon or worker binary | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Pure SQL install, managed Postgres ready | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Language-agnostic SQL API | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Multiple independent consumers (fan-out) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Shared-log fan-out: each consumer sees every event | ✅ | ✅ | ❌ | ❌ | ❌ | ⚠️ |
 | Built-in retry with backoff | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
 | Built-in dead letter queue | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ✅ |
 
@@ -110,6 +111,7 @@ See [docs/three-latencies.md](docs/three-latencies.md) for the breakdown, tick-c
 - **No external daemon:** PgQue uses pg_cron (or your own scheduler) for ticking; PGMQ uses visibility timeouts. River, Que, and pg-boss require a Go / Ruby / Node.js worker binary.
 - **[Que](https://github.com/que-rb/que)** uses advisory locks (not SKIP LOCKED) — no dead tuples from *claiming*, but completed jobs are still DELETEd. Brandur's [bloat post](https://brandur.org/postgres-queues) was about Que at Heroku. Ruby-only.
 - **PGMQ retry** is visibility-timeout re-delivery (`read_ct` tracking) — no configurable backoff or max attempts.
+- **PGMQ consumers:** PGMQ supports multiple producers and multiple competing consumers/workers. The `❌` in the fan-out row means it does not provide PgQ-style independent consumer cursors where every registered consumer receives every event from a shared log.
 - **pg-boss fan-out** is copy-per-queue `publish()`/`subscribe()`, not a shared event log with independent cursors.
 - **Category:** River, Que, and pg-boss (and Oban, graphile-worker, solid_queue, good_job) are **job queue frameworks**. PgQue is an **event/message queue** optimized for high-throughput streaming with fan-out.
 
@@ -213,7 +215,7 @@ For sub-second ticking from an external driver, loop `pgque.ticker()` at your ta
 
 **Important:** PgQue does not deliver messages without a working ticker. Enqueueing still works, but consumers will see nothing new because no ticks are created. If you do not use `pg_cron`, run `pgque.ticker()`, `pgque.maint_retry_events()`, and `pgque.maint()` yourself. Skipping `maint_retry_events()` means nack'd events will never be redelivered.
 
-Treat installation as one-way for now — upgrade and reinstall paths are still being tightened. To uninstall: `\i sql/pgque_uninstall.sql`.
+For existing installs, follow the SQL-file upgrade procedure in [docs/upgrading.md](docs/upgrading.md). To uninstall: `\i sql/pgque_uninstall.sql`.
 
 ### Optional: install as a [`pg_tle`](https://github.com/aws/pg_tle) extension
 
@@ -285,6 +287,7 @@ The default install stays small; additional APIs live under `sql/experimental/` 
 
 - [Tutorial](docs/tutorial.md) — a hands-on walkthrough. Start here if you are new.
 - [Reference](docs/reference.md) — every shipped function and role.
+- [Upgrading](docs/upgrading.md) — SQL-file upgrade procedure for existing installs.
 - [Examples](docs/examples.md) — patterns: fan-out, exactly-once, batch loading, recurring jobs.
 - [Benchmarks](docs/benchmarks.md) — throughput measurements and methodology.
 - [Tick frequency tuning](docs/tick-frequency.md) — latency/WAL trade-offs, idle tick behavior, and pg_cron logging caveats.
@@ -333,12 +336,12 @@ Longer walkthrough in the [tutorial](docs/tutorial.md); patterns like fan-out, e
 
 ## Client libraries
 
-PgQue is SQL-first, so any Postgres driver works. First-party client libraries live in this repo for **Python**, **Go**, **TypeScript**, and **Ruby** — all in v0.2 release-candidate state. Each section below shows the install command for that ecosystem's version spelling: PyPI uses `0.2.0rc1`, RubyGems uses `0.2.0.rc.1`, npm and Go use `0.2.0-rc.1`.
+PgQue is SQL-first, so any Postgres driver works. First-party client libraries live in this repo for **Python**, **Go**, and **TypeScript** (all published at `v0.2.0`), plus **Ruby**, shipping in v0.3.
 
 ### Python (`pgque-py`) — psycopg 3
 
 ```bash
-pip install --pre pgque-py        # or: pip install "pgque-py==0.2.0rc1"
+pip install pgque-py
 ```
 
 ```python
@@ -364,7 +367,7 @@ consumer.start()
 ### Go (`github.com/NikolayS/pgque-go`) — pgx/v5
 
 ```bash
-go get github.com/NikolayS/pgque-go@v0.2.0-rc.1
+go get github.com/NikolayS/pgque-go@v0.2.0
 ```
 
 ```go
@@ -386,7 +389,7 @@ consumer.Start(ctx)
 ### TypeScript (`pgque`) — node-postgres
 
 ```bash
-npm install pgque@rc        # or: bun add pgque@rc
+npm install pgque        # or: bun add pgque
 ```
 
 ```ts
@@ -465,6 +468,51 @@ Numbers there are for reference and exploration, not a final verdict —
 benchmarking Postgres queues is hard (cf. Brendan Gregg) and the
 methodology continues to evolve.
 
+The dedicated subconsumer demo harness lives in
+[`benchmark/subconsumer-scaling/`](benchmark/subconsumer-scaling/). It fixes the
+per-message downstream work at 250 ms and varies only consumer parallelism, so
+the scaling story is easy to see without mixing in producer cadence or tick
+tuning.
+
+## Subconsumers / cooperative consumers
+
+This is the use case that keeps coming up: the queue itself is fast, but the
+downstream side effect is not. If one message means one transactional email API
+call (Resend, SendGrid), one SMS request, one webhook, or one slow HTTP POST,
+then consumer-side parallelism is what decides whether the backlog melts or
+lingers.
+
+PgQue does not need a second queue to show that effect. One main consumer can
+fetch a batch and fan the work out to a pool of subconsumers. To make the point
+concrete, the demo harness preloads the same 160-message backlog every time and
+replaces the email-provider call with a fixed `sleep(250 ms)` per message — an
+intentional stand-in for a service like Resend or SendGrid. That means one
+worker should top out near 4 messages / second. Then we increase only the
+number of subconsumers.
+
+<p align="center"><img src="docs/images/backlog_race.gif" alt="Backlog drain race for 1, 2, 4, 8, and 16 subconsumers on the same 160-message queue with 250 ms of work per message" width="760"></p>
+
+Observed drain times from the demo run above:
+
+| Subconsumers | Avg throughput | Drain time |
+|---:|---:|---:|
+| 1  | 4.0 msg/s  | 40.4 s |
+| 2  | 7.9 msg/s  | 20.3 s |
+| 4  | 15.8 msg/s | 10.1 s |
+| 8  | 31.3 msg/s | 5.1 s  |
+| 16 | 61.8 msg/s | 2.6 s  |
+
+The static view below keeps the y-axis on **throughput**. That makes the
+scaling story more obvious: one worker buys you ~4 messages / second, and the
+observed line tracks the ideal `4 × workers` line closely.
+
+<p align="center"><img src="docs/images/scaling_linearity.png" alt="Observed throughput vs ideal linear scaling for 1, 2, 4, 8, and 16 subconsumers on the same 160-message backlog" width="760"></p>
+
+These are demo numbers, not a product claim. The point is narrower and more
+useful: when downstream work costs ~250 ms / message, one worker buys you ~4
+messages / second, and extra subconsumers scale throughput and backlog drain
+close to linearly until some other bottleneck shows up.
+
 ## Architecture
 
 PgQue keeps PgQ's proven core architecture — snapshot-based batch isolation, three-table TRUNCATE rotation on the hot path, separate retry / delayed / dead-letter tables, and independent per-consumer cursors — and adds a modern API layer on top. See [blueprints/SPECx.md](blueprints/SPECx.md) for the full specification and [docs/pgq-concepts.md](docs/pgq-concepts.md) for the batch/tick/rotation glossary.
@@ -481,12 +529,12 @@ PgQue keeps PgQ's proven core architecture — snapshot-based batch isolation, t
 | `pg_cron`, `pg_timetable`, or external ticking | ✅ |
 | Sub-second ticking with `pg_cron` (default 10 ticks/sec, tunable) | ✅ |
 | System-table rotation / bloat mitigation |  |
-| Cooperative consumers / subconsumers | 🔬 experimental |
+| [Cooperative consumers / subconsumers](#subconsumers--cooperative-consumers) | 🔬 experimental |
 | Queue splitter |  |
 | Queue mover |  |
 | Modern `send`, `receive`, `ack`, `nack` API | ✅ |
 | `send_batch` API | ✅ |
-| Improved `send_batch` performance |  |
+| Improved `send_batch` performance | ✅ |
 | Dead-letter queue after retry limit | ✅ |
 | Go library | ✅ |
 | TypeScript library | ✅ |

@@ -3,9 +3,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  PgqueBatchNotFoundError,
   PgqueConnectionError,
+  PgqueConsumerNotFoundError,
   PgqueQueueNotFoundError,
   PgqueSqlError,
+  Client,
   connect,
 } from '../src/index.js';
 import { TEST_DSN, setupTestQueue, teardownTestQueue, advanceQueue, type TestEnv } from './helpers.js';
@@ -163,6 +166,29 @@ describe('Client (env-gated, requires PGQUE_TEST_DSN)', () => {
     ).rejects.toBeInstanceOf(PgqueQueueNotFoundError);
   });
 
+  skipIfNoDb('receive with nonexistent consumer raises PgqueConsumerNotFoundError', async () => {
+    await expect(env.client.receive(env.queue, 'missing_consumer_xyz', 10)).rejects.toBeInstanceOf(
+      PgqueConsumerNotFoundError,
+    );
+  });
+
+  skipIfNoDb('nack with nonexistent batch raises PgqueBatchNotFoundError', async () => {
+    await expect(
+      env.client.nack(999999999999n, {
+        msgId: 1n,
+        batchId: 999999999999n,
+        type: 'missing.batch',
+        payload: '{}',
+        retryCount: null,
+        createdAt: new Date(),
+        extra1: null,
+        extra2: null,
+        extra3: null,
+        extra4: null,
+      }),
+    ).rejects.toBeInstanceOf(PgqueBatchNotFoundError);
+  });
+
   skipIfNoDb('sendBatch rejects non-serializable payloads', async () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;
@@ -301,5 +327,61 @@ describe('Client (env-gated, requires PGQUE_TEST_DSN)', () => {
       await env.client.ack(batch[0]!.batchId);
     }
     expect(total).toBe(N);
+  });
+});
+
+describe('Client error classification (in-memory)', () => {
+  function clientThatRaises(message: string): Client {
+    return new Client({
+      query: async () => {
+        throw { message };
+      },
+    } as never);
+  }
+
+  it.each([
+    'queue not found: missing_q',
+    'no such queue',
+    'No such event queue',
+    'Event queue not created yet',
+    'event queue not found: missing_q',
+  ])('maps queue errors to PgqueQueueNotFoundError: %s', async (message) => {
+    await expect(clientThatRaises(message).ticker('missing_q')).rejects.toBeInstanceOf(
+      PgqueQueueNotFoundError,
+    );
+  });
+
+  it.each(['batch not found: 42', 'Cannot find data for batch 42'])(
+    'maps batch errors to PgqueBatchNotFoundError: %s',
+    async (message) => {
+      await expect(
+        clientThatRaises(message).nack(42n, {
+          msgId: 1n,
+          batchId: 42n,
+          type: 'x',
+          payload: '{}',
+          retryCount: null,
+          createdAt: new Date(),
+          extra1: null,
+          extra2: null,
+          extra3: null,
+          extra4: null,
+        }),
+      ).rejects.toBeInstanceOf(PgqueBatchNotFoundError);
+    },
+  );
+
+  it.each([
+    { message: 'Connection terminated unexpectedly' },
+    { message: 'Cannot use a pool after calling end on the pool' },
+    { message: 'query failed', code: 'ECONNRESET' },
+  ])('maps connection errors to PgqueConnectionError: $message', async (cause) => {
+    const client = new Client({
+      query: async () => {
+        throw cause;
+      },
+    } as never);
+
+    await expect(client.send('q', { payload: {} })).rejects.toBeInstanceOf(PgqueConnectionError);
   });
 });

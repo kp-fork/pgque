@@ -1,5 +1,5 @@
 -- pgque.sql -- PgQ Universal Edition
--- Version: 0.2.0-rc.1
+-- Version: 0.2.0
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 -- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
 --
@@ -4570,7 +4570,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 create or replace function pgque.version()
 returns text as $$
 begin
-    return '0.2.0-rc.1';
+    return '0.2.0';
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 
@@ -5757,7 +5757,8 @@ begin
             and t2.tick_id = s.sub_next_tick
     where
         q.queue_name = i_queue_name
-        and c.co_name = i_consumer_name;
+        and c.co_name = i_consumer_name
+    for update of s;
     if not found then
         errmsg := 'Not subscriber to queue: '
             || coalesce(i_queue_name, 'NULL')
@@ -5855,6 +5856,13 @@ begin
 
     -- get next batch
     batch_id := nextval('pgque.batch_id_seq');
+    -- Defense in depth: filter on sub_role = 'normal' so a stray coop_main
+    -- row (e.g. memberless one that bypassed the rejection above) cannot be
+    -- stamped with sub_batch. With FOR UPDATE held since the initial SELECT,
+    -- sub_role cannot change here, so the filter is a guard against future
+    -- regressions rather than a fix for a reachable bug today. The column
+    -- name is qualified because the function declares a local PL/pgSQL
+    -- variable also named sub_role.
     update pgque.subscription
     set
         sub_batch = batch_id,
@@ -5862,7 +5870,8 @@ begin
         sub_active = now()
     where
         sub_queue = queue_id
-        and sub_consumer = cons_id;
+        and sub_consumer = cons_id
+        and pgque.subscription.sub_role = 'normal';
     return;
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
@@ -6718,6 +6727,60 @@ begin
     end if;
 end $$;
 
+-- v0.1.0 shipped these public wrappers with i_* argument names.
+-- PostgreSQL rejects CREATE OR REPLACE FUNCTION when input argument names
+-- change, even when the signature is otherwise identical. Drop only those
+-- old wrappers before recreating them with the stable v0.2 API names so the
+-- documented "re-run sql/pgque.sql to upgrade" path works from v0.1.0.
+-- Do not unconditionally drop current wrappers: users may have dependent
+-- views/functions, and normal idempotent reinstall must preserve those OIDs.
+-- Also preserve the old function owner when the upgrade is run by a superuser:
+-- dropped SECURITY DEFINER wrappers must not silently become superuser-owned.
+create temporary table if not exists pgque_v01_wrapper_owners (
+    sig text primary key,
+    owner_name name not null
+);
+
+do $$
+declare
+    v_sig text;
+    proc regprocedure;
+    args text;
+    v_owner_name name;
+begin
+    foreach v_sig in array array[
+        'pgque.send(text,jsonb)',
+        'pgque.send(text,text)',
+        'pgque.send(text,text,jsonb)',
+        'pgque.send(text,text,text)',
+        'pgque.send_batch(text,text,jsonb[])',
+        'pgque.send_batch(text,text,text[])',
+        'pgque.subscribe(text,text)',
+        'pgque.unsubscribe(text,text)'
+    ] loop
+        proc := to_regprocedure(v_sig);
+        if proc is null then
+            continue;
+        end if;
+
+        args := pg_get_function_arguments(proc);
+        if args like 'i\_%' escape '\' then
+            select r.rolname
+            into v_owner_name
+            from pg_proc as p
+            join pg_roles as r on r.oid = p.proowner
+            where p.oid = proc::oid;
+
+            insert into pg_temp.pgque_v01_wrapper_owners (sig, owner_name)
+            values (v_sig, v_owner_name)
+            on conflict (sig) do update
+                set owner_name = excluded.owner_name;
+
+            execute format('drop function %s', proc);
+        end if;
+    end loop;
+end $$;
+
 -- pgque.send(queue, payload jsonb) -- send with default type, JSON payload
 create or replace function pgque.send(queue_name text, payload jsonb)
 returns bigint as $$
@@ -6725,6 +6788,7 @@ begin
     return pgque.insert_event(queue_name, 'default', payload::text);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send(text, jsonb) from public;
 
 -- pgque.send(queue, payload text) -- fast path, opaque textual payload
 -- Skips the jsonb parse + canonical reserialize round-trip. Use this when
@@ -6738,6 +6802,7 @@ begin
     return pgque.insert_event(queue_name, 'default', payload);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send(text, text) from public;
 
 -- pgque.send(queue, type, payload jsonb) -- send with explicit type, JSON payload
 create or replace function pgque.send(queue_name text, type_name text, payload jsonb)
@@ -6746,6 +6811,7 @@ begin
     return pgque.insert_event(queue_name, type_name, payload::text);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send(text, text, jsonb) from public;
 
 -- pgque.send(queue, type, payload text) -- fast path with explicit type
 create or replace function pgque.send(queue_name text, type_name text, payload text)
@@ -6754,6 +6820,7 @@ begin
     return pgque.insert_event(queue_name, type_name, payload);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send(text, text, text) from public;
 
 -- pgque.insert_event_bulk(queue, type, payloads text[]) -- internal set-based primitive
 -- Deliberately does not call insert_event_raw(): batch send needs one table
@@ -6839,6 +6906,7 @@ begin
     return pgque.send_batch(queue_name, 'default', payloads);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send_batch(text, jsonb[]) from public;
 
 -- pgque.send_batch(queue, type, payloads jsonb[]) -- set-based batch send
 create or replace function pgque.send_batch(
@@ -6855,6 +6923,7 @@ begin
     return pgque.insert_event_bulk(queue_name, type_name, payloads::text[]);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send_batch(text, text, jsonb[]) from public;
 
 -- pgque.send_batch(queue, payloads text[]) -- default-type fast-path batch send
 create or replace function pgque.send_batch(queue_name text, payloads text[])
@@ -6863,6 +6932,7 @@ begin
     return pgque.send_batch(queue_name, 'default', payloads);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send_batch(text, text[]) from public;
 
 -- pgque.send_batch(queue, type, payloads text[]) -- set-based fast-path batch send
 create or replace function pgque.send_batch(
@@ -6879,6 +6949,7 @@ begin
     return pgque.insert_event_bulk(queue_name, type_name, payloads);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.send_batch(text, text, text[]) from public;
 
 -- pgque.subscribe(queue, consumer) -- wrapper for register_consumer
 create or replace function pgque.subscribe(queue text, consumer text)
@@ -6887,6 +6958,7 @@ begin
     return pgque.register_consumer(queue, consumer);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.subscribe(text, text) from public;
 
 -- pgque.unsubscribe(queue, consumer) -- wrapper for unregister_consumer
 create or replace function pgque.unsubscribe(queue text, consumer text)
@@ -6895,6 +6967,44 @@ begin
     return pgque.unregister_consumer(queue, consumer);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
+revoke execute on function pgque.unsubscribe(text, text) from public;
+
+-- Restore owners for wrappers that had to be dropped during v0.1.0 upgrade.
+do $$
+declare
+    rec record;
+    proc regprocedure;
+begin
+    if to_regclass('pg_temp.pgque_v01_wrapper_owners') is null then
+        return;
+    end if;
+
+    for rec in select sig, owner_name from pg_temp.pgque_v01_wrapper_owners
+    loop
+        proc := to_regprocedure(rec.sig);
+        if proc is not null then
+            execute format('alter function %s owner to %I', proc, rec.owner_name);
+
+            -- Restored v0.1.0 send_batch wrappers are SECURITY DEFINER and
+            -- call the new v0.2.0 internal bulk primitive. Preserve runtime
+            -- behavior for non-superuser owners by granting just that owner
+            -- execute on the primitive their wrapper now needs. The grant is
+            -- intentionally persistent: the restored wrapper keeps calling
+            -- this locked-down primitive on later idempotent reinstalls.
+            if rec.sig in (
+                'pgque.send_batch(text,text,jsonb[])',
+                'pgque.send_batch(text,text,text[])'
+            ) then
+                execute format(
+                    'grant execute on function pgque.insert_event_bulk(text, text, text[]) to %I',
+                    rec.owner_name
+                );
+            end if;
+        end if;
+    end loop;
+end $$;
+
+drop table if exists pg_temp.pgque_v01_wrapper_owners;
 
 -- Grants for the send* + subscribe/unsubscribe family.
 -- send* are producer-side (insert events) -> pgque_writer.
