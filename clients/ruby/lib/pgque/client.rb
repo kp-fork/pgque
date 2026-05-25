@@ -90,6 +90,21 @@ module Pgque
       raise_wrapped_sql_error(e)
     end
 
+    def ticker(queue)
+      result = @conn.exec_params("select pgque.ticker($1)", [queue])
+      v = scalar(result)
+      v.nil? || v.empty? ? nil : v.to_i
+    rescue PG::Error => e
+      raise_wrapped_sql_error(e)
+    end
+
+    def ticker_all
+      result = @conn.exec_params("select pgque.ticker()", [])
+      integer_scalar(result)
+    rescue PG::Error => e
+      raise_wrapped_sql_error(e)
+    end
+
     # Experimental: function names, edge-case behavior, and signatures may
     # change before the cooperative API is marked stable.
     def subscribe_subconsumer(queue, consumer, subconsumer)

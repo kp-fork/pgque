@@ -85,7 +85,7 @@ users to install `--pre`, `@rc`, or an `-rc` Go tag.
 | `receive` | ✓ | ✓ | ✓ | ✓ |
 | `ack` returns SQL rowcount (0 stale, 1 success) | ✓ (int) | ✓ (int64) | ✓ (number) | ✓ (Integer) |
 | `nack` | ✓ | ✓ | ✓ | ✓ |
-| `ticker` / `Ticker` / `ticker`, `ticker_all` / `TickerAll` / `tickerAll` | ✓ | ✓ | ✓ | ✗ |
+| `ticker` / `Ticker` / `ticker`, `ticker_all` / `TickerAll` / `tickerAll` | ✓ | ✓ | ✓ | ✓ |
 | `force_next_tick` / `ForceNextTick` / `forceNextTick` | ✓ | ✓ | ✓ | ✓ |
 | `nack` retry delay + reason options | ✓ | ✓ | ✓ | ✓ |
 | High-level `Consumer` | ✓ | ✓ | ✓ | ✓ |
@@ -100,9 +100,8 @@ users to install `--pre`, `@rc`, or an `-rc` Go tag.
 
 Legend: ✓ supported by the client API on `main`; ✗ not exposed as a
 first-class client API. Lower-level SQL primitives remain available through raw
-connection/pool escape hatches. Python, Go, and TypeScript expose `ticker` and
-`subscribe` / `unsubscribe` convenience wrappers; Ruby can call those via raw
-SQL.
+connection/pool escape hatches. Python, Go, and TypeScript expose `subscribe` /
+`unsubscribe` convenience wrappers; Ruby can call those via raw SQL.
 
 [^coop]: Experimental. Each supporting client exposes
     `subscribe_subconsumer` / `unsubscribe_subconsumer` / `receive_coop` /
