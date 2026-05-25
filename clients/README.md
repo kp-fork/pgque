@@ -95,13 +95,12 @@ users to install `--pre`, `@rc`, or an `-rc` Go tag.
 | `Consumer` retry delay option | ✓ | ✓ | ✓ | ✓ |
 | Unknown-type behavior avoids silent ack | ✓ | ✓ | ✓ | ✓ |
 | Configurable unknown-type policy | ✓ | ✓ | ✓ | ✓ |
-| `subscribe` / `unsubscribe` wrappers | ✓ | ✓ | ✓ | ✗ |
+| `subscribe` / `unsubscribe` wrappers | ✓ | ✓ | ✓ | ✓ |
 | Cooperative consumers (experimental) [^coop] | ✓ | ✓ | ✓ | ✓ |
 
 Legend: ✓ supported by the client API on `main`; ✗ not exposed as a
 first-class client API. Lower-level SQL primitives remain available through raw
-connection/pool escape hatches. Python, Go, and TypeScript expose `subscribe` /
-`unsubscribe` convenience wrappers; Ruby can call those via raw SQL.
+connection/pool escape hatches.
 
 [^coop]: Experimental. Each supporting client exposes
     `subscribe_subconsumer` / `unsubscribe_subconsumer` / `receive_coop` /

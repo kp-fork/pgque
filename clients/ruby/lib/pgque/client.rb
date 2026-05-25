@@ -82,6 +82,24 @@ module Pgque
       raise_wrapped_sql_error(e)
     end
 
+    def subscribe(queue, consumer)
+      result = @conn.exec_params(
+        "select pgque.subscribe($1, $2)", [queue, consumer]
+      )
+      integer_scalar(result)
+    rescue PG::Error => e
+      raise_wrapped_sql_error(e)
+    end
+
+    def unsubscribe(queue, consumer)
+      result = @conn.exec_params(
+        "select pgque.unsubscribe($1, $2)", [queue, consumer]
+      )
+      integer_scalar(result)
+    rescue PG::Error => e
+      raise_wrapped_sql_error(e)
+    end
+
     def force_next_tick(queue)
       result = @conn.exec_params("select pgque.force_next_tick($1)", [queue])
       v = scalar(result)
