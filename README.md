@@ -413,7 +413,7 @@ try {
 ### Ruby (`pgque`) — pg gem
 
 ```bash
-gem install pgque --pre        # or pin: gem "pgque", "0.2.0.rc.1"
+gem install pgque --pre        # or pin: gem "pgque", "0.3.0.rc.1"
 ```
 
 ```ruby

@@ -11,11 +11,11 @@ universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
 gem install pgque --pre
 ```
 
-`--pre` is required while v0.2.0 is in release-candidate; the latest
-published version is `0.2.0.rc.1`. Pin the exact version if you prefer:
+`--pre` is required while v0.3.0 is in release-candidate; the latest
+published version is `0.3.0.rc.1`. Pin the exact version if you prefer:
 
 ```ruby
-gem "pgque", "0.2.0.rc.1"
+gem "pgque", "0.3.0.rc.1"
 ```
 
 Requires Ruby 3.1+ and PostgreSQL 14+ with the PgQue schema installed

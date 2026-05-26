@@ -3,7 +3,7 @@
 Gem name: `pgque` on RubyGems.org.
 
 ```bash
-gem install pgque --pre        # while v0.2.0 is in release-candidate
+gem install pgque --pre        # while v0.3.0 is in release-candidate
 ```
 
 ```ruby
@@ -33,7 +33,7 @@ first release is therefore manual:
 cd clients/ruby
 gem build pgque.gemspec
 gem signin                   # one-time, prompts for rubygems.org credentials
-gem push pgque-0.2.0.rc.1.gem
+gem push pgque-0.3.0.rc.1.gem
 ```
 
 After that, every subsequent release goes through the workflow below.
@@ -84,7 +84,7 @@ The release workflow is `.github/workflows/release-ruby.yml`.
 7. Verify the published artifact installs in a clean environment:
 
    ```bash
-   gem install pgque --pre        # or pin: gem install pgque -v 0.2.0.rc.1
+   gem install pgque --pre        # or pin: gem install pgque -v 0.3.0.rc.1
    ruby -rpgque -e 'puts Pgque::VERSION'
    ```
 
