@@ -1,0 +1,717 @@
+---
+import { Code } from '@astrojs/starlight/components';
+
+const installSql = `-- one file, any Postgres 14+, managed or self-hosted
+\\i sql/pgque.sql
+select pgque.start();              -- pg_cron ticks 10x/sec
+
+select pgque.create_queue('orders');
+select pgque.subscribe('orders', 'fulfilment');
+select pgque.send('orders', '{"id": 42}');   -- enqueue
+
+-- a consumer reads the current batch, then acks it
+select * from pgque.receive('orders', 'fulfilment');
+select pgque.ack(:batch_id);`;
+
+const features = [
+  {
+    n: '01',
+    title: 'Zero bloat by design',
+    body: 'Snapshot-based batching and TRUNCATE-based rotation instead of per-row DELETE. No dead tuples in the hot path, immune to xmin-horizon pinning. It does not get slower because it has been running for months.',
+  },
+  {
+    n: '02',
+    title: 'The anti-extension',
+    body: 'Pure SQL and PL/pgSQL. No C extension, no shared_preload_libraries, no daemon, no restart. Installs with \\i pgque.sql on RDS, Aurora, Cloud SQL, AlloyDB, Supabase, Neon, and Crunchy Bridge.',
+  },
+  {
+    n: '03',
+    title: 'Native fan-out',
+    body: 'Every consumer keeps its own cursor on one shared event log and independently receives all events. No data duplication, atomic batch boundaries, late subscribers catch up. Closer to Kafka topics than to a job queue.',
+  },
+  {
+    n: '04',
+    title: 'Real Postgres guarantees',
+    body: 'ACID transactions, transactional enqueue and consume, WAL, backups, replication, SQL visibility. Wrap receive + business writes + ack in one transaction for exactly-once — a property external brokers cannot offer.',
+  },
+  {
+    n: '05',
+    title: 'Built for sustained load',
+    body: 'The same engine PgQ ran at Skype for messaging across hundreds of millions of users, for over a decade. PgQue rebuilds it for the heavy-load regime it was designed for.',
+  },
+  {
+    n: '06',
+    title: 'Retry, backoff, and DLQ',
+    body: 'Built-in retry with configurable backoff and a dead letter queue. nack with a delay to reschedule; messages route to the DLQ after max_retries. Inspect and replay from SQL.',
+  },
+];
+
+const comparison = {
+  rows: [
+    ['Snapshot batching (no row locks)', true, false, false, false],
+    ['Zero bloat under sustained load', true, false, false, false],
+    ['No external daemon or worker binary', true, true, false, false],
+    ['Pure SQL, managed-Postgres ready', true, true, true, true],
+    ['Multiple independent consumers (fan-out)', true, false, false, 'partial'],
+    ['Built-in dead letter queue', true, 'partial', 'partial', true],
+  ],
+  cols: ['PgQue', 'PGMQ', 'River', 'pg-boss'],
+};
+
+const clients = [
+  { name: 'TypeScript', pkg: 'pgque', href: 'https://github.com/NikolayS/pgque/tree/main/clients/typescript' },
+  { name: 'Python', pkg: 'pgque', href: 'https://github.com/NikolayS/pgque/tree/main/clients/python' },
+  { name: 'Go', pkg: 'pgque-go', href: 'https://github.com/NikolayS/pgque/tree/main/clients/go' },
+];
+
+const cell = (v) =>
+  v === true ? 'yes' : v === false ? 'no' : 'partial';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>PgQue — zero-bloat Postgres queue</title>
+    <meta
+      name="description"
+      content="PgQue is a zero-bloat Postgres queue: PgQ repackaged for managed Postgres. One SQL file to install, pg_cron to tick. Snapshot-based batching, native fan-out, no dead tuples."
+    />
+    <link rel="canonical" href="https://pgque.dev/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="PgQue — zero-bloat Postgres queue" />
+    <meta
+      property="og:description"
+      content="PgQ repackaged for managed Postgres. One SQL file to install, pg_cron to tick. Snapshot-based batching, native fan-out, no dead tuples."
+    />
+    <meta property="og:url" content="https://pgque.dev/" />
+    <meta property="og:image" content="https://pgque.dev/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Set theme before paint to avoid a flash; sync with Starlight's key. -->
+    <script is:inline>
+      (() => {
+        const stored = localStorage.getItem('starlight-theme');
+        const theme =
+          stored === 'light' || stored === 'dark'
+            ? stored
+            : window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark';
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="bg-field" aria-hidden="true"></div>
+
+    <header class="nav">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+        <span class="brand-word">PgQue</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/docs/tutorial">Tutorial</a>
+        <a href="/docs">Docs</a>
+        <a href="/docs/concepts">Concepts</a>
+        <a href="https://github.com/NikolayS/pgque">GitHub</a>
+        <a
+          class="gh-star"
+          href="https://github.com/NikolayS/pgque"
+          target="_blank"
+          rel="noopener"
+          aria-label="Star NikolayS/pgque on GitHub"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/>
+          </svg>
+          <span>Star</span>
+          <span class="gh-count" data-gh-count>★</span>
+        </a>
+        <button
+          class="theme-toggle"
+          type="button"
+          aria-label="Toggle color theme"
+          title="Toggle theme"
+        >
+          <svg class="ic-sun" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>
+            </g>
+          </svg>
+          <svg class="ic-moon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            <path fill="currentColor" d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot"></span>PgQ, universal edition</p>
+          <h1>Zero-bloat Postgres queue.<br /><span class="accent">One SQL file to install.</span></h1>
+          <p class="lede">
+            A durable event stream that lives inside Postgres. The model is closer
+            to Kafka — a shared log with independent per-consumer cursors — than to
+            a task-message broker. Pure SQL and PL/pgSQL, any Postgres 14+, managed
+            or self-hosted. No sidecar daemon, no C extension.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="/docs/tutorial">Get started</a>
+            <a class="btn btn-ghost" href="https://github.com/NikolayS/pgque">View on GitHub</a>
+          </div>
+          <div class="install">
+            <span class="install-prompt">$</span>
+            <code>\i sql/pgque.sql</code>
+            <span class="install-note">then <code>select pgque.start();</code></span>
+          </div>
+        </div>
+        <figure class="hero-visual">
+          <div class="hero-visual-frame">
+            <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <img
+              src="/images/death_spiral.gif"
+              alt="Throughput of a SKIP LOCKED queue collapsing under sustained load — the failure mode PgQue avoids by construction"
+              loading="eager"
+              width="720"
+            />
+          </div>
+          <figcaption>
+            The death spiral of a <code>SKIP LOCKED</code> queue under sustained
+            load — the failure mode PgQue avoids by construction.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="band">
+        <div class="band-inner split reveal">
+          <div class="split-copy">
+            <h2>Not <code>SKIP LOCKED</code>. Not row-claiming.</h2>
+            <p>
+              Most Postgres queues rely on <code>SKIP LOCKED</code> plus
+              <code>DELETE</code> and <code>UPDATE</code>. That holds up in toy
+              examples, then turns into dead tuples, VACUUM pressure, index bloat,
+              and performance drift under load.
+            </p>
+            <p>
+              PgQue uses <strong>snapshot-based batching</strong> and
+              <strong>TRUNCATE-based rotation</strong> instead. Events become
+              visible in batches between ticks. The hot path stays predictable, and
+              the queue does not get slower the longer it runs.
+            </p>
+            <p class="muted">
+              The trade-off is end-to-end delivery latency — about a 50 ms median
+              at the default 100 ms tick rate (p50 ≈ 52 ms), tunable down by lowering
+              the tick period. If you need single-digit-millisecond dispatch, PgQue is
+              the wrong tool. If you need stability under load without a bloat tax,
+              this is where it fits.
+            </p>
+          </div>
+          <div class="split-code">
+            <Code code={installSql} lang="sql" title="quickstart.sql" />
+          </div>
+        </div>
+      </section>
+
+      <section class="features reveal">
+        <h2 class="section-title">Why PgQue</h2>
+        <div class="feature-grid">
+          {features.map((f) => (
+            <article class="feature-card">
+              <span class="feature-n" aria-hidden="true">{f.n}</span>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="band-inner reveal">
+          <h2 class="section-title">How it compares</h2>
+          <p class="section-sub">
+            PgQue is an event/message queue optimized for high-throughput streaming
+            with fan-out — not a job-queue framework. The full table and notes live
+            in <a href="https://github.com/NikolayS/pgque#comparison">the README</a>.
+          </p>
+          <div class="table-wrap">
+            <table class="cmp">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  {comparison.cols.map((c) => (
+                    <th class={c === 'PgQue' ? 'col-self' : ''}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.rows.map((row) => (
+                  <tr>
+                    <td>{row[0]}</td>
+                    {row.slice(1).map((v, i) => (
+                      <td class={`mark mark-${cell(v)} ${i === 0 ? 'col-self' : ''}`}>
+                        <span class="sr">{cell(v)}</span>
+                        <span aria-hidden="true">
+                          {v === true ? '✓' : v === false ? '—' : '•'}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p class="legend">✓ yes · — no · • partial / indirect</p>
+        </div>
+      </section>
+
+      <section class="clients reveal">
+        <h2 class="section-title">Client libraries</h2>
+        <p class="section-sub">
+          Use the SQL API directly, or a typed client. The API is language-agnostic —
+          everything is a function call.
+        </p>
+        <div class="client-row">
+          {clients.map((c) => (
+            <a class="client-card" href={c.href}>
+              <span class="client-name">{c.name}</span>
+              <code>{c.pkg}</code>
+              <span class="client-arrow" aria-hidden="true">→</span>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <section class="cta-final reveal">
+        <div class="cta-final-inner">
+          <h2>A queue that does not rot.</h2>
+          <p>Install in one transaction. Tick with pg_cron. Read the ten-minute tutorial.</p>
+          <div class="cta-row center">
+            <a class="btn btn-primary" href="/docs/tutorial">Start the tutorial</a>
+            <a class="btn btn-ghost" href="/docs/reference">Function reference</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <a class="brand small" href="/">
+            <span class="brand-mark" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </span>
+            <span class="brand-word">PgQue</span>
+          </a>
+          <p class="footer-copy">
+            © 2026 Nik Samokhvalov · Apache-2.0
+          </p>
+          <p class="footer-heritage">
+            <a href="/docs/concepts">Built on PgQ</a>
+          </p>
+        </div>
+        <nav class="footer-links">
+          <a href="/docs">Docs</a>
+          <a href="/docs/tutorial">Tutorial</a>
+          <a href="/docs/reference">Reference</a>
+          <a href="https://github.com/NikolayS/pgque">GitHub</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script is:inline>
+      // Theme toggle: cycle light <-> dark, persisted under Starlight's key.
+      (() => {
+        const root = document.documentElement;
+        const btn = document.querySelector('.theme-toggle');
+        if (btn) {
+          btn.addEventListener('click', () => {
+            const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+            root.dataset.theme = next;
+            try { localStorage.setItem('starlight-theme', next); } catch {}
+          });
+        }
+        // Stay in sync if the theme is changed in another tab (e.g. the docs).
+        window.addEventListener('storage', (e) => {
+          if (e.key === 'starlight-theme' && (e.newValue === 'light' || e.newValue === 'dark')) {
+            root.dataset.theme = e.newValue;
+          }
+        });
+
+        // Lightweight GitHub star count, async + cached, fails silently.
+        const el = document.querySelector('[data-gh-count]');
+        if (el) {
+          const KEY = 'pgque-gh-stars';
+          const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : '' + n);
+          try {
+            const cached = JSON.parse(localStorage.getItem(KEY) || 'null');
+            if (cached && Date.now() - cached.t < 3600000) el.textContent = fmt(cached.n);
+          } catch {}
+          fetch('https://api.github.com/repos/NikolayS/pgque')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (d && typeof d.stargazers_count === 'number') {
+                el.textContent = fmt(d.stargazers_count);
+                try { localStorage.setItem(KEY, JSON.stringify({ n: d.stargazers_count, t: Date.now() })); } catch {}
+              }
+            })
+            .catch(() => {});
+        }
+
+        // Scroll reveals via IntersectionObserver. Must NEVER leave content hidden.
+        const items = document.querySelectorAll('.reveal');
+        const showAll = () => items.forEach((n) => n.classList.add('is-in'));
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (reduce || !('IntersectionObserver' in window)) {
+          showAll();
+        } else {
+          const inView = (n) => {
+            const r = n.getBoundingClientRect();
+            return r.top < (window.innerHeight || 0) && r.bottom > 0;
+          };
+          // Anything already on screen at load is shown immediately (no fade-in flash).
+          items.forEach((n) => { if (inView(n)) n.classList.add('is-in'); });
+
+          const io = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((e) => {
+                if (e.isIntersecting) {
+                  e.target.classList.add('is-in');
+                  io.unobserve(e.target);
+                }
+              });
+            },
+            { rootMargin: '0px 0px -10% 0px', threshold: 0.08 }
+          );
+          items.forEach((n) => { if (!n.classList.contains('is-in')) io.observe(n); });
+
+          // Safety net: never let a .reveal stay invisible permanently. If the
+          // observer somehow never fires for an element, force it visible.
+          setTimeout(showAll, 4000);
+        }
+      })();
+    </script>
+
+    <style is:global>
+      :root {
+        color-scheme: light dark;
+        --blue: #336791;
+        --blue-light: #5b9bd5;
+        --amber: #f0883e;
+        --radius: 14px;
+      }
+      /* Dark (default) */
+      :root[data-theme='dark'] {
+        --bg: #0a0e14;
+        --bg-soft: #0e141c;
+        --panel: #141b25;
+        --panel-2: #19222e;
+        --border: #222c3a;
+        --border-soft: #1a232f;
+        --text: #e8eef4;
+        --text-2: #ccd6e0;
+        --muted: #a4b1bf;
+        --accent: var(--blue-light);
+        --grid: rgba(91, 155, 213, 0.06);
+        --glow: rgba(51, 103, 145, 0.30);
+        color-scheme: dark;
+      }
+      /* Light */
+      :root[data-theme='light'] {
+        --bg: #f7f9fb;
+        --bg-soft: #eef2f6;
+        --panel: #ffffff;
+        --panel-2: #f3f6f9;
+        --border: #d9e1e9;
+        --border-soft: #e6ecf2;
+        --text: #142231;
+        --text-2: #32424f;
+        --muted: #4c5a68;
+        --accent: var(--blue);
+        --grid: rgba(51, 103, 145, 0.05);
+        --glow: rgba(51, 103, 145, 0.16);
+        color-scheme: light;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+        transition: background 0.3s ease, color 0.3s ease;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+      h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
+      main { max-width: 1140px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+      .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+      /* animated background: dot grid + slow drifting glow + a faint "flowing log" sweep */
+      .bg-field {
+        position: fixed; inset: 0; z-index: 0; pointer-events: none;
+        background:
+          radial-gradient(circle at 18% 12%, var(--glow), transparent 42%),
+          radial-gradient(circle at 84% 78%, var(--glow), transparent 46%),
+          radial-gradient(var(--grid) 1px, transparent 1px);
+        background-size: auto, auto, 30px 30px;
+        background-position: 0 0, 0 0, 0 0;
+        animation: drift 26s ease-in-out infinite alternate;
+      }
+      .bg-field::after {
+        content: ''; position: absolute; inset: 0;
+        background: linear-gradient(115deg, transparent 0%, var(--glow) 48%, transparent 60%);
+        opacity: 0.5; mix-blend-mode: screen;
+        background-size: 280% 280%;
+        animation: flow 22s linear infinite;
+      }
+      :root[data-theme='light'] .bg-field::after { mix-blend-mode: multiply; opacity: 0.35; }
+      @keyframes drift {
+        0%   { background-position: 0 0, 0 0, 0 0; }
+        100% { background-position: 4% 3%, -3% -2%, 30px 30px; }
+      }
+      @keyframes flow {
+        0%   { background-position: 0% 0%; }
+        100% { background-position: 280% 280%; }
+      }
+
+      /* reveal-on-scroll */
+      .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(.22,.61,.36,1); }
+      .reveal.is-in { opacity: 1; transform: none; }
+
+      /* nav */
+      .nav {
+        max-width: 1140px; margin: 0 auto; padding: 18px 24px;
+        display: flex; align-items: center; justify-content: space-between;
+        position: relative; z-index: 2;
+      }
+      .brand { display: flex; align-items: center; gap: 11px; color: var(--text); }
+      .brand:hover { text-decoration: none; }
+      .brand-mark { display: inline-flex; flex-direction: column; gap: 3px; width: 22px; }
+      .brand-mark span { height: 4px; border-radius: 2px; display: block; transition: transform 0.25s ease; }
+      .brand-mark span:nth-child(1) { background: var(--blue-light); }
+      .brand-mark span:nth-child(2) { background: var(--blue); }
+      .brand-mark span:nth-child(3) { background: var(--amber); }
+      .brand:hover .brand-mark span:nth-child(1) { transform: translateX(3px); }
+      .brand:hover .brand-mark span:nth-child(3) { transform: translateX(-3px); }
+      .brand-word { font-family: ui-monospace, monospace; font-weight: 700; font-size: 1.3rem; letter-spacing: -0.03em; }
+      .brand.small .brand-word { font-size: 1.1rem; }
+      .nav-links { display: flex; gap: 20px; align-items: center; }
+      .nav-links a:not(.gh-star) { color: var(--muted); font-size: 0.95rem; }
+      .nav-links a:not(.gh-star):hover { color: var(--text); text-decoration: none; }
+
+      /* GitHub star widget */
+      .gh-star {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+        background: var(--panel); color: var(--text) !important; font-size: 0.86rem; font-weight: 600;
+        transition: border-color 0.18s ease, transform 0.1s ease, background 0.18s ease;
+      }
+      .gh-star:hover { text-decoration: none; border-color: var(--amber); transform: translateY(-1px); }
+      .gh-star svg { color: var(--amber); }
+      .gh-count {
+        font-variant-numeric: tabular-nums; color: var(--muted);
+        padding-left: 7px; margin-left: 1px; border-left: 1px solid var(--border);
+      }
+
+      /* theme toggle */
+      .theme-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+        border: 1px solid var(--border); background: var(--panel); color: var(--text);
+        transition: border-color 0.18s ease, color 0.18s ease, transform 0.1s ease;
+      }
+      .theme-toggle:hover { border-color: var(--accent); transform: translateY(-1px); }
+      .theme-toggle .ic-moon { display: none; }
+      .theme-toggle .ic-sun { display: none; }
+      :root[data-theme='dark'] .theme-toggle .ic-moon { display: block; }
+      :root[data-theme='light'] .theme-toggle .ic-sun { display: block; }
+
+      /* hero */
+      .hero {
+        display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 52px;
+        align-items: center; padding: 64px 0 84px;
+      }
+      .eyebrow {
+        display: inline-flex; align-items: center; gap: 8px;
+        text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.74rem;
+        color: var(--amber); margin: 0 0 18px; font-weight: 700;
+      }
+      .eyebrow-dot {
+        width: 7px; height: 7px; border-radius: 50%; background: var(--amber);
+        box-shadow: 0 0 0 0 rgba(240,136,62,0.5); animation: pulse 2.6s ease-out infinite;
+      }
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(240,136,62,0.5); }
+        70%, 100% { box-shadow: 0 0 0 8px rgba(240,136,62,0); }
+      }
+      .hero h1 { font-size: clamp(2.2rem, 4.7vw, 3.5rem); margin: 0 0 22px; font-weight: 800; }
+      .accent { color: var(--accent); }
+      .lede { font-size: 1.12rem; color: var(--text-2); margin: 0 0 30px; max-width: 36em; }
+      .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+      .cta-row.center { justify-content: center; }
+      .btn {
+        display: inline-flex; align-items: center; padding: 12px 24px; border-radius: 9px;
+        font-weight: 600; font-size: 0.98rem; border: 1px solid transparent;
+        transition: transform 0.1s ease, background 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+      }
+      .btn:hover { text-decoration: none; transform: translateY(-2px); }
+      .btn-primary { background: var(--blue); color: #fff; box-shadow: 0 8px 24px -10px var(--glow); }
+      .btn-primary:hover { background: #3d76a3; box-shadow: 0 12px 30px -10px var(--glow); }
+      .btn-ghost { border-color: var(--border); color: var(--text); background: var(--panel); }
+      .btn-ghost:hover { border-color: var(--accent); }
+      .install {
+        margin-top: 28px; padding: 12px 16px; background: var(--panel);
+        border: 1px solid var(--border); border-radius: 10px; display: inline-flex;
+        gap: 10px; align-items: baseline; flex-wrap: wrap; font-family: ui-monospace, monospace;
+      }
+      .install-prompt { color: var(--amber); font-weight: 700; }
+      .install > code { color: var(--accent); font-weight: 600; }
+      .install-note { color: var(--muted); font-size: 0.9rem; }
+
+      .hero-visual { margin: 0; }
+      .hero-visual-frame {
+        position: relative; border-radius: var(--radius); border: 1px solid var(--border);
+        background: var(--panel); padding: 32px 12px 12px; overflow: hidden;
+        box-shadow: 0 30px 70px -34px var(--glow), 0 2px 0 var(--border-soft);
+      }
+      .frame-dots { position: absolute; top: 12px; left: 14px; display: flex; gap: 6px; }
+      .frame-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); display: block; }
+      .frame-dots i:nth-child(1) { background: var(--amber); }
+      .hero-visual img { width: 100%; display: block; border-radius: 8px; }
+      .hero-visual figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
+
+      /* bands */
+      .band { position: relative; background: var(--bg-soft); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+      .band-inner { max-width: 1140px; margin: 0 auto; padding: 72px 24px; position: relative; z-index: 1; }
+      .split { display: grid; grid-template-columns: 1fr 1fr; gap: 52px; align-items: center; }
+      .split-copy h2 { font-size: clamp(1.7rem, 3vw, 2.1rem); margin: 0 0 20px; }
+      .split-copy h2 code { color: var(--amber); }
+      .split-copy p { color: var(--text-2); margin: 0 0 14px; }
+      .split-copy strong { color: var(--text); }
+      .split-copy .muted { color: var(--muted); font-size: 0.95rem; }
+      .split-code :global(.expressive-code) { font-size: 0.86rem; }
+
+      .section-title {
+        font-size: clamp(1.7rem, 3vw, 2.1rem); text-align: center; margin: 0 0 14px;
+      }
+      .section-sub { text-align: center; color: var(--muted); max-width: 46em; margin: 0 auto 40px; }
+
+      /* features */
+      .features { padding: 84px 0; }
+      .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      .feature-card {
+        position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 26px 24px 24px; overflow: hidden;
+        transition: border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+      }
+      .feature-card::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: linear-gradient(90deg, var(--blue-light), var(--blue), var(--amber));
+        transform: scaleX(0); transform-origin: left; transition: transform 0.3s ease;
+      }
+      .feature-card:hover { border-color: var(--border); transform: translateY(-3px); box-shadow: 0 18px 40px -24px var(--glow); }
+      .feature-card:hover::before { transform: scaleX(1); }
+      .feature-n {
+        font-family: ui-monospace, monospace; font-size: 0.78rem; font-weight: 700;
+        color: var(--accent); letter-spacing: 0.08em; opacity: 0.7;
+      }
+      .feature-card h3 { margin: 8px 0 10px; font-size: 1.14rem; color: var(--text); }
+      .feature-card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+      /* comparison */
+      .table-wrap {
+        overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--panel);
+      }
+      table.cmp { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+      table.cmp th, table.cmp td { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); text-align: left; }
+      table.cmp tbody tr:last-child td { border-bottom: none; }
+      table.cmp thead th { color: var(--muted); font-weight: 600; background: var(--panel-2); }
+      table.cmp td:first-child { color: var(--text-2); }
+      table.cmp tbody tr:hover td { background: var(--panel-2); }
+      table.cmp .mark { text-align: center; font-size: 1.15rem; }
+      .mark-yes { color: var(--blue-light); }
+      :root[data-theme='light'] .mark-yes { color: var(--blue); }
+      .mark-no { color: var(--muted); opacity: 0.55; }
+      .mark-partial { color: var(--amber); }
+      .col-self { background: rgba(51,103,145,0.12); }
+      th.col-self { color: var(--accent); font-weight: 800; }
+      .legend { text-align: center; color: var(--text-2); font-weight: 500; font-size: 0.9rem; margin-top: 18px; }
+
+      /* clients */
+      .clients { padding: 84px 0; }
+      .client-row { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+      .client-card {
+        position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 22px 26px; display: flex; flex-direction: column; gap: 6px; min-width: 200px;
+        color: var(--text); transition: border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+      }
+      .client-card:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-3px); box-shadow: 0 18px 40px -24px var(--glow); }
+      .client-name { font-weight: 700; font-size: 1.05rem; }
+      .client-card code { color: var(--muted); }
+      .client-arrow { position: absolute; top: 20px; right: 22px; color: var(--accent); opacity: 0; transform: translateX(-4px); transition: opacity 0.2s ease, transform 0.2s ease; }
+      .client-card:hover .client-arrow { opacity: 1; transform: none; }
+
+      /* final cta */
+      .cta-final { padding: 96px 0; }
+      .cta-final-inner {
+        text-align: center; max-width: 760px; margin: 0 auto; padding: 56px 32px;
+        border: 1px solid var(--border); border-radius: 20px; background: var(--panel);
+        box-shadow: 0 30px 80px -40px var(--glow);
+        position: relative; overflow: hidden;
+      }
+      .cta-final-inner::before {
+        content: ''; position: absolute; inset: 0; z-index: 0;
+        background: radial-gradient(circle at 50% -20%, var(--glow), transparent 60%);
+      }
+      .cta-final-inner > * { position: relative; z-index: 1; }
+      .cta-final h2 { font-size: clamp(1.8rem, 3.4vw, 2.3rem); margin: 0 0 12px; }
+      .cta-final p { color: var(--muted); margin: 0 0 30px; }
+
+      /* footer */
+      .footer { border-top: 1px solid var(--border); background: var(--bg-soft); position: relative; z-index: 1; }
+      .footer-inner {
+        max-width: 1140px; margin: 0 auto; padding: 44px 24px;
+        display: flex; justify-content: space-between; gap: 32px; flex-wrap: wrap;
+      }
+      .footer-brand { display: flex; flex-direction: column; gap: 10px; }
+      .footer-copy { color: var(--text-2); font-size: 0.92rem; margin: 0; font-weight: 500; }
+      .footer-heritage { margin: 0; font-size: 0.85rem; }
+      .footer-heritage a { color: var(--muted); }
+      .footer-links { display: flex; flex-direction: column; gap: 8px; }
+      .footer-links a { color: var(--muted); font-size: 0.92rem; }
+      .muted { color: var(--muted); }
+
+      @media (max-width: 880px) {
+        .hero { grid-template-columns: 1fr; gap: 40px; padding: 36px 0 56px; }
+        .split { grid-template-columns: 1fr; gap: 30px; }
+        .feature-grid { grid-template-columns: 1fr; }
+        .nav-links a:nth-child(3) { display: none; }
+        .gh-star span:not(.gh-count) { display: none; }
+      }
+      @media (max-width: 520px) {
+        .nav-links { gap: 12px; }
+        .nav-links a:not(.gh-star):not([href='/docs']) { display: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+        .reveal { opacity: 1; transform: none; }
+        html { scroll-behavior: auto; }
+        .bg-field { animation: none; }
+      }
+    </style>
+  </body>
+</html>

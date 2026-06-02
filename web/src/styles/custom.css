@@ -1,0 +1,27 @@
+/* PgQue brand theming for Starlight docs. PostgreSQL blue (#336791) accent. */
+:root {
+  --sl-color-accent-low: #16242f;
+  --sl-color-accent: #336791;
+  --sl-color-accent-high: #b9d4e8;
+  --sl-color-white: #ffffff;
+
+  --pgque-blue: #336791;
+  --pgque-blue-light: #5b9bd5;
+  --pgque-amber: #f0883e;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d7e6f1;
+  --sl-color-accent: #2a587c;
+  --sl-color-accent-high: #16313f;
+}
+
+/* Slightly tighter, more technical heading rhythm. */
+.sl-markdown-content h2 {
+  margin-top: 2.25rem;
+}
+
+/* Monospace inline code with a subtle accent border, matching the SQL focus. */
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--sl-color-gray-5);
+}
