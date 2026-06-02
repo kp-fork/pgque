@@ -58,7 +58,8 @@ wait is about half the period, and the worst case is about one full period.
 
 The committed benchmark confirms this. At the default `tick_period_ms = 100`,
 median end-to-end delivery is about 52 ms — almost exactly period/2 — with a
-maximum of about 105 ms, roughly one period. See `benchmark/tick-rate/`.
+maximum of roughly one period (about 105–145 ms across the committed runs). See
+`benchmark/tick-rate/`.
 
 ### It does not grow with load
 
@@ -100,12 +101,17 @@ Postgres 16, `pg_cron` with `use_background_workers = on`; 100 ev/s producer,
 | `tick_period_ms` | Effective rate | p50 e2e | p95 e2e | max e2e |
 |------------------|----------------|---------|---------|---------|
 | 1000 | 1 tick/sec | ≈ 503 ms | — | — |
-| 100 (default) | 10 ticks/sec | ≈ 52 ms | ≈ 99 ms | ≈ 105 ms |
+| 100 (default) | 10 ticks/sec | ≈ 52 ms | ≈ 99 ms | ≈ 105 ms¹ |
 | 10 | 100 ticks/sec | ≈ 8 ms | — | — |
 | 1 | 1000 ticks/sec | ≈ 3 ms | — | — |
 
+¹ Max from the idle-sweep run (`benchmark/tick-rate/README.md`). A separate
+committed run at the same period (`results-baseline.json`) saw a max of about
+145 ms; treat the default-tick worst case as ~105–145 ms.
+
 At the default the distribution is clean: p50 ≈ 52 ms, p95 ≈ 99 ms, max
-≈ 105 ms — tracking "wait for the next tick, mean ≈ period/2". At 10 ms and
+≈ 105–145 ms across the committed runs — tracking "wait for the next tick,
+mean ≈ period/2". At 10 ms and
 1 ms the median drops to single digits, but the benchmark shows the tail
 inflating toward the 1-second slot length: at very short periods the inner loop
 may not finish all its iterations within one cron slot, so an occasional tick

@@ -146,7 +146,7 @@ PgQue is SQL-first, so any Postgres driver works. First-party clients for Python
 Python ([clients/python](https://github.com/NikolayS/pgque/tree/main/clients/python)):
 
 ```bash
-pip install --pre pgque-py
+pip install pgque-py
 ```
 
 ```python
@@ -183,7 +183,7 @@ if len(msgs) > 0 {
 TypeScript ([clients/typescript](https://github.com/NikolayS/pgque/tree/main/clients/typescript)):
 
 ```bash
-npm install pgque@rc   # or: bun add pgque@rc
+npm install pgque   # or: bun add pgque
 ```
 
 ```ts
