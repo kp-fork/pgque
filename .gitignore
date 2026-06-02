@@ -8,3 +8,8 @@ clients/typescript/package-lock.json
 
 # Claude Code agent worktrees (ephemeral isolation per agent run)
 .claude/worktrees/
+
+# Website (web/) build artifacts
+web/node_modules/
+web/dist/
+web/.astro/

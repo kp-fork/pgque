@@ -1,0 +1,26 @@
+name: Website build check
+
+# Validate the Astro + Starlight site builds on every PR that touches the site
+# or the docs it renders, so build breaks never reach main (where deploy runs).
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'docs/**'
+      - '.github/workflows/web-ci.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build site
+        working-directory: web
+        run: npm run build
