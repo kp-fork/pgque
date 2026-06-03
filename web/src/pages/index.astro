@@ -162,38 +162,56 @@ const cell = (v) =>
  * marks stay legible on both the parchment-light and deep-dusk-dark themes.
  *
  * Trademark notice: each mark is used nominatively — solely to indicate that
- * these platforms ship pg_cron, so PgQue's automated ticker works out of the
- * box. No endorsement or affiliation is implied. Full-colour logo sources:
- *   amazonrds / amazonaurora — AWS Architecture Icons (official AWS brand)
- *   googlecloud (Cloud SQL + AlloyDB) — gilbarbara/logos (Google Cloud brand)
- *   azure — svgl.app (Microsoft Azure brand)
- *   supabase / digitalocean / planetscale — gilbarbara/logos (vendor brands)
+ * PgQue is compatible with these platforms (they ship pg_cron, so PgQue's
+ * automated ticker works out of the box). No endorsement or affiliation is
+ * implied; every mark stays the property of its respective owner. Each tile
+ * uses the platform's correct PRODUCT-SPECIFIC official icon (e.g. the RDS
+ * service icon, not the generic AWS logo). Full-colour logo sources:
+ *   amazonrds / amazonaurora — AWS Architecture service icons (official AWS)
+ *   googlecloudsql / googlealloydb — official Google Cloud product icons
+ *     (cloud.google.com/icons → core-products-icons.zip)
+ *   azure — Azure "Database for PostgreSQL Server" service icon
+ *     (learn.microsoft.com/azure/architecture/icons official package)
+ *   supabase / planetscale — gilbarbara/logos (vendor brands)
+ *   digitalocean — official Digital Ocean brand icon
  *   neon — neon.tech brand mark (#00E599)
- *   aiven — aiven.io brand symbol (CNCF landscape hosted_logos)
+ *   aiven — aiven.io official single-colour coral crab (favicon geometry)
+ *   crunchybridge — crunchybridge.com brand mark (Crunchy Data elephant)
+ *   tiger — tigerdata.com brand badge (Tiger Data tiger mark)
+ *   clickhouse — ClickHouse official mark (clickhouse.com)
+ *   ibm — IBM official 8-bar logo · oracle — Oracle official logo
+ *   ubicloud — ubicloud.com brand cloud symbol
  *   yugabyte — gilbarbara/logos (YugabyteDB brand icon)
  *   percona — percona.com brand mark
  *   stackgres — stackgres.io official brand mark (matches apple-touch-icon)
  *   cloudnativepg — cloudnative-pg/artwork (CNCF project mark)
+ *   zalando — zalando/postgres-operator project mark (robot arm + elephant)
  */
 const platformGroups = [
   {
     label: 'Managed cloud',
     items: [
       { name: 'Amazon RDS', logo: 'amazonrds' },
-      { name: 'Google Cloud SQL', logo: 'googlecloud' },
+      { name: 'Google Cloud SQL', logo: 'googlecloudsql' },
       { name: 'Azure Database', logo: 'azure' },
       { name: 'Supabase', logo: 'supabase' },
       { name: 'Neon', logo: 'neon' },
       { name: 'Aiven', logo: 'aiven-icon' },
       { name: 'DigitalOcean', logo: 'digitalocean' },
       { name: 'PlanetScale', logo: 'planetscale' },
+      { name: 'Crunchy Bridge', logo: 'crunchybridge' },
+      { name: 'Tiger Data', logo: 'tiger' },
+      { name: 'ClickHouse Cloud', logo: 'clickhouse' },
+      { name: 'IBM Cloud', logo: 'ibm' },
+      { name: 'Oracle OCI', logo: 'oracle' },
+      { name: 'Ubicloud', logo: 'ubicloud' },
     ],
   },
   {
     label: 'Postgres-compatible',
     items: [
       { name: 'Amazon Aurora', logo: 'amazonaurora' },
-      { name: 'Google AlloyDB', logo: 'googlecloud' },
+      { name: 'Google AlloyDB', logo: 'googlealloydb' },
       { name: 'YugabyteDB', logo: 'yugabyte-icon' },
     ],
   },
@@ -203,6 +221,7 @@ const platformGroups = [
       { name: 'StackGres', logo: 'stackgres' },
       { name: 'CloudNativePG', logo: 'cloudnativepg-icon' },
       { name: 'Percona Operator', logo: 'percona' },
+      { name: 'Zalando', logo: 'zalando' },
     ],
   },
 ];
@@ -295,7 +314,7 @@ const platformGroups = [
     </header>
 
     <main>
-      <section class="hero">
+      <section class="hero" id="top">
         <div class="hero-copy">
           <p class="eyebrow"><span class="eyebrow-dot"></span>PgQ, universal edition</p>
           <h1>Zero-bloat Postgres queue.</h1>
@@ -340,7 +359,7 @@ const platformGroups = [
         </figure>
       </section>
 
-      <section class="band">
+      <section class="band" id="why">
         <div class="band-inner split reveal">
           <div class="split-copy">
             <h2 class="h2-nowrap">Not <code>SKIP&nbsp;LOCKED</code>. Not row claiming.</h2>
@@ -370,8 +389,8 @@ const platformGroups = [
         </div>
       </section>
 
-      <section class="features reveal">
-        <h2 class="section-title">Why PgQue</h2>
+      <section class="features reveal" id="features">
+        <h2 class="section-title anchored"><a class="anchor-link" href="#features" aria-label="Link to this section">#</a>Why PgQue</h2>
         <div class="feature-grid">
           {features.map((f) => (
             <article class="feature-card">
@@ -383,9 +402,9 @@ const platformGroups = [
         </div>
       </section>
 
-      <section class="band">
+      <section class="band" id="compare">
         <div class="band-inner reveal">
-          <h2 class="section-title">How it compares</h2>
+          <h2 class="section-title anchored"><a class="anchor-link" href="#compare" aria-label="Link to this section">#</a>How it compares</h2>
           <p class="section-sub">
             PgQue is an event/message queue optimized for high-throughput streaming
             with fan-out — not a job-queue framework. The full table and notes live
@@ -426,8 +445,8 @@ const platformGroups = [
         </div>
       </section>
 
-      <section class="runson reveal">
-        <h2 class="section-title">Runs on</h2>
+      <section class="runson reveal" id="runs-on">
+        <h2 class="section-title anchored"><a class="anchor-link" href="#runs-on" aria-label="Link to this section">#</a>Runs on</h2>
         <p class="section-sub">
           PgQue runs on any Postgres 14+. These platforms ship pg_cron, so the
           automated ticker works out of the box.
@@ -458,8 +477,8 @@ const platformGroups = [
         </div>
       </section>
 
-      <section class="clients reveal">
-        <h2 class="section-title">Client libraries</h2>
+      <section class="clients reveal" id="clients">
+        <h2 class="section-title anchored"><a class="anchor-link" href="#clients" aria-label="Link to this section">#</a>Client libraries</h2>
         <p class="section-sub">
           Use the SQL API directly, or a typed client. The API is language-agnostic —
           everything is a function call.
@@ -508,7 +527,7 @@ const platformGroups = [
         </div>
       </section>
 
-      <section class="cta-final reveal">
+      <section class="cta-final reveal" id="install">
         <div class="cta-final-inner">
           <h2>A queue that does not rot.</h2>
           <p>Install in one transaction. Tick with pg_cron. Read the ten-minute tutorial.</p>
@@ -520,7 +539,7 @@ const platformGroups = [
       </section>
     </main>
 
-    <footer class="footer">
+    <footer class="footer" id="footer">
       <div class="footer-inner">
         <div class="footer-brand">
           <a class="brand small" href="/">
@@ -746,6 +765,24 @@ const platformGroups = [
 
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; overflow-x: hidden; }
+      /* deep-linkable sections: offset the smooth-scroll target so the fixed
+         nav never covers a section heading when you land on a #-anchor. */
+      main > section[id], footer[id] { scroll-margin-top: 88px; }
+
+      /* understated hover-anchor affordance: a faint mono '#' that fades in to
+         the left of a section heading and links to that section's URL. */
+      .anchored { position: relative; }
+      .anchor-link {
+        position: absolute; left: -1.15em; top: 0;
+        font-family: var(--mono); font-weight: 500; color: var(--muted);
+        opacity: 0; transform: translateX(3px);
+        transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
+        text-decoration: none; line-height: inherit;
+      }
+      .anchor-link:hover { color: var(--accent); text-decoration: none; }
+      .anchored:hover .anchor-link,
+      .anchor-link:focus-visible { opacity: 0.75; transform: translateX(0); }
+      @media (max-width: 720px) { .anchor-link { display: none; } }
       body {
         margin: 0;
         background: var(--bg);
