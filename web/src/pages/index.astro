@@ -155,19 +155,24 @@ const cell = (v) =>
   v === true ? 'yes' : v === false ? 'no' : 'partial';
 
 /*
- * "Runs on" platform wall. Every mark is a REAL official brand logo (not a
- * monogram), saved under /public/logos/ and recoloured to a single steel tone
- * via CSS `mask-image` for a cohesive set that stays legible in both themes.
- * All marks are used nominatively — solely to indicate that these platforms
- * ship pg_cron, so PgQue's automated ticker works out of the box. No
- * endorsement or affiliation is implied. Logo sources:
- *   amazonrds / amazonaurora — gilbarbara/logos (AWS Architecture Icons)
- *   googlecloud (Cloud SQL + AlloyDB) — simple-icons (CC0-1.0)
+ * "Runs on" platform wall. Every mark is the REAL official, full-colour brand
+ * logo, saved under /public/logos/ and rendered as an <img> in its native
+ * colours — no mask, no recolour. Each logo sits on a subtle neutral chip so
+ * pure-white (Aiven), pure-dark (PlanetScale) and dark-navy (CloudNativePG)
+ * marks stay legible on both the parchment-light and deep-dusk-dark themes.
+ *
+ * Trademark notice: each mark is used nominatively — solely to indicate that
+ * these platforms ship pg_cron, so PgQue's automated ticker works out of the
+ * box. No endorsement or affiliation is implied. Full-colour logo sources:
+ *   amazonrds / amazonaurora — AWS Architecture Icons (official AWS brand)
+ *   googlecloud (Cloud SQL + AlloyDB) — gilbarbara/logos (Google Cloud brand)
  *   azure — svgl.app (Microsoft Azure brand)
- *   supabase / neon / digitalocean / planetscale / percona — simple-icons (CC0)
+ *   supabase / digitalocean / planetscale — gilbarbara/logos (vendor brands)
+ *   neon — neon.tech brand mark (#00E599)
  *   aiven — aiven.io brand symbol (CNCF landscape hosted_logos)
  *   yugabyte — gilbarbara/logos (YugabyteDB brand icon)
- *   stackgres — stackgres.io brand symbol
+ *   percona — percona.com brand mark
+ *   stackgres — stackgres.io official brand mark (matches apple-touch-icon)
  *   cloudnativepg — cloudnative-pg/artwork (CNCF project mark)
  */
 const platformGroups = [
@@ -434,11 +439,9 @@ const platformGroups = [
               <div class="runson-wall">
                 {g.items.map((p) => (
                   <div class="plat-tile">
-                    <span
-                      class="plat-logo"
-                      style={`-webkit-mask-image:url(/logos/${p.logo}.svg);mask-image:url(/logos/${p.logo}.svg)`}
-                      aria-hidden="true"
-                    ></span>
+                    <span class="plat-chip" aria-hidden="true">
+                      <img class="plat-logo" src={`/logos/${p.logo}.svg`} alt="" loading="lazy" decoding="async" width="26" height="26" />
+                    </span>
                     <span class="plat-name">{p.name}</span>
                   </div>
                 ))}
@@ -1051,18 +1054,20 @@ const platformGroups = [
         border-color: var(--accent); transform: translateY(-2px);
         box-shadow: 0 16px 36px -26px var(--glow);
       }
-      /* Uniform steel treatment: real logo geometry, single brand-steel tone,
-         recoloured from the source SVG via mask so light + dark both stay legible. */
-      .plat-logo {
-        flex: none; width: 26px; height: 26px; display: block;
-        background-color: var(--accent-2);
-        -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-        -webkit-mask-position: center; mask-position: center;
-        -webkit-mask-size: contain; mask-size: contain;
-        transition: background-color 0.18s ease;
+      /* Logos render in their REAL brand colours (no mask/recolour). Each sits
+         on a subtle neutral chip so pure-white, pure-dark and dark-navy marks
+         stay legible on both themes. */
+      .plat-chip {
+        flex: none; display: flex; align-items: center; justify-content: center;
+        width: 38px; height: 38px; border-radius: 9px;
+        background: #fbfaf7; border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+        transition: box-shadow 0.18s ease;
       }
-      :root[data-theme='light'] .plat-logo { background-color: var(--blue); }
-      .plat-tile:hover .plat-logo { background-color: var(--accent); }
+      .plat-logo { display: block; width: 26px; height: 26px; object-fit: contain; }
+      .plat-tile:hover .plat-chip {
+        box-shadow: 0 4px 12px -6px var(--glow), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+      }
       .plat-name {
         font-family: var(--mono); font-size: 0.86rem; font-weight: 500;
         color: var(--text-2); letter-spacing: -0.01em;
