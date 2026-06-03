@@ -161,77 +161,114 @@ select pgque.start();
 a custom DB (cluster) parameter group, then reboot the instance. Connect as an
 `rds_superuser` and `create extension pg_cron;`. To run the ticker in your PgQue
 database rather than `postgres`, set the `cron.database_name` parameter to it.
+See the official setup guides for
+[RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL_pg_cron.html)
+and
+[Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/PostgreSQL_pg_cron.html).
 
 **Azure Database for PostgreSQL — Flexible Server.** Add `pg_cron` to the
 `azure.extensions` server parameter and to `shared_preload_libraries`, then
 restart the server. `create extension pg_cron;` in the target database. Azure
 does not use `cron.database_name`; use `cron.schedule_in_database(...)` to run
 jobs in a specific database, and omit the job username (jobs run as the
-scheduling user, which needs `azure_pg_admin`).
+scheduling user, which needs `azure_pg_admin`). See the official
+[pg_cron considerations](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-considerations#pg_cron).
 
 **Google Cloud SQL for PostgreSQL.** Set the database flag
 `cloudsql.enable_pg_cron=on` (this restarts the instance), then
 `create extension pg_cron;`. Set the `cron.database_name` flag if you want cron
-in a non-default database.
+in a non-default database. See the official
+[Cloud SQL extensions reference](https://docs.cloud.google.com/sql/docs/postgres/extensions).
 
 **Google AlloyDB for PostgreSQL.** Set the instance flag
 `alloydb.enable_pg_cron=on` (requires an instance restart), then
 `create extension pg_cron;` in each target database. The `cron.database_name`
-flag is settable once enabled.
+flag is settable once enabled. See the official
+[AlloyDB flags](https://docs.cloud.google.com/alloydb/docs/reference/alloydb-flags)
+and
+[supported extensions](https://docs.cloud.google.com/alloydb/docs/reference/extensions)
+references.
 
 **Supabase.** Enable the `pg_cron` extension from the Dashboard
 (Integrations → Cron), or run `create extension if not exists pg_cron;`. No
 restart needed. On the standard project database no `cron.database_name` change
-is required.
+is required. See the official
+[pg_cron extension](https://supabase.com/docs/guides/database/extensions/pg_cron)
+and [Cron](https://supabase.com/docs/guides/cron) docs.
 
 **Neon.** Set `cron.database_name` to the target database via the compute
 endpoint settings, restart the compute, then
 `create extension if not exists pg_cron;`. Note the auto-ticker only fires while
 the compute is active — disable scale-to-zero (or run the compute 24/7) so ticks
-keep flowing during idle periods.
+keep flowing during idle periods. See the official
+[pg_cron extension](https://neon.com/docs/extensions/pg_cron) docs.
 
 **Aiven for PostgreSQL.** `pg_cron` is already preloaded; just
 `create extension pg_cron;` in the target database as `avnadmin` (or another
-admin user).
+admin user). See the official
+[pg_cron how-to](https://aiven.io/docs/products/postgresql/howto/use-pg-cron-extension).
 
 **DigitalOcean Managed PostgreSQL.** `create extension pg_cron;` — no special
 preload step. `cron.database_name` is not configurable on this platform, so
 `pg_cron` (and therefore the auto-ticker) only operates in the `defaultdb`
-database; install PgQue there if you want the in-database ticker.
+database; install PgQue there if you want the in-database ticker. See the
+official
+[supported extensions](https://docs.digitalocean.com/products/databases/postgresql/details/supported-extensions/)
+docs.
 
 **Crunchy Bridge.** `pg_cron` is preloadable on Bridge; just
 `create extension pg_cron;` in the target database. Set `cron.database_name` if
-you want cron in a non-default database.
+you want cron in a non-default database. See the official
+[extensions and languages](https://docs.crunchybridge.com/extensions-and-languages)
+docs.
 
 **Tiger Data (Tiger Cloud).** Connect as the `tsdbadmin` user and run
-`create extension if not exists pg_cron;`.
+`create extension if not exists pg_cron;`. See the official
+[extensions](https://www.tigerdata.com/docs/deploy/mst/extensions) docs.
 
 **ClickHouse Cloud (Managed Postgres).** Connect and run
-`create extension pg_cron;` — `pg_cron` 1.6 is available, no preload step.
+`create extension pg_cron;` — `pg_cron` 1.6 is available, no preload step. See
+the official
+[Managed Postgres extensions](https://clickhouse.com/docs/cloud/managed-postgres/extensions)
+docs.
 
 **IBM Cloud Databases for PostgreSQL.** `create extension pg_cron;`, then
-schedule jobs with `cron.schedule()` against the target database.
+schedule jobs with `cron.schedule()` against the target database. See the
+official
+[pg_cron](https://cloud.ibm.com/docs/databases-for-postgresql?topic=databases-for-postgresql-pg_cron)
+docs.
 
 **Oracle OCI Database with PostgreSQL.** Enable `pg_cron` in a custom database
 configuration (via the OCI Extension Manager in the Console), apply it to the
 database system, then `create extension pg_cron;`. `pg_cron` runs in the
 `postgres` database by default; set `pg_cron.database_name` to target another.
+See the official
+[extensions](https://docs.oracle.com/en-us/iaas/Content/postgresql/extensions.htm)
+and
+[pg_cron release notes](https://docs.oracle.com/en-us/iaas/releasenotes/postgresql/pg_cron-pgaudit.htm)
+docs.
 
 **Ubicloud Managed PostgreSQL.** `create extension pg_cron;` — `pg_cron` 1.6
-ships in the managed image, no preload step.
+ships in the managed image, no preload step. See the official
+[extensions](https://www.ubicloud.com/docs/managed-postgresql/extensions) docs.
 
 ### Postgres-compatible platforms
 
 **PlanetScale for Postgres.** Enable `pg_cron` from the dashboard
 (Clusters → branch → Extensions), queue and apply the change (this restarts the
 database), then `create extension if not exists pg_cron;`. Set
-`cron.database_name` to the database where you created the extension.
+`cron.database_name` to the database where you created the extension. See the
+official
+[pg_cron extension](https://planetscale.com/docs/postgres/extensions/pg_cron)
+docs.
 
 **YugabyteDB.** Set the cluster-wide gflag `enable_pg_cron=true` on all
 YB-Masters and YB-TServers, optionally set `ysql_cron_database_name` (defaults
 to `yugabyte`), then `create extension pg_cron;` as a superuser. Jobs run on a
 single elected `pg_cron` leader; expect a worst-case ~60 s gap on leader
-failover or job changes — acceptable for the rotation ticker.
+failover or job changes — acceptable for the rotation ticker. See the official
+[pg_cron extension](https://docs.yugabyte.com/stable/additional-features/pg-extensions/extension-pgcron/)
+docs.
 
 ### Kubernetes operators
 
@@ -247,24 +284,35 @@ spec:
 ```
 
 Applying the manifest triggers the restart the `shared_preload_libraries` change
-needs; default DB is `postgres`, or set `cron.database_name`.
+needs; default DB is `postgres`, or set `cron.database_name`. The Spilo image
+[bundles `pg_cron`](https://github.com/zalando/spilo/blob/master/postgres-appliance/build_scripts/base.sh).
 
 **StackGres.** Declare `pg_cron` in the `SGCluster` extensions list (StackGres
 downloads it into the container — no custom image), add
 `shared_preload_libraries = 'pg_cron'` to the referenced `SGPostgresConfig`,
 trigger a restart via an `SGDbOps` operation, then `create extension pg_cron;`.
+See the official
+[extensions](https://stackgres.io/doc/1.5/administration/extensions/) docs.
 
 **CloudNativePG.** `pg_cron` is not in the stock CNPG image — build a custom
 operand image with the PGDG `postgresql-NN-cron` package. Declare it in
 `.spec.postgresql.shared_preload_libraries: ["pg_cron"]`, create the extension
 via `.spec.bootstrap.initdb.postInitSQL` (or manually), and let the operator do
-the rolling restart that the `shared_preload_libraries` change requires.
+the rolling restart that the `shared_preload_libraries` change requires. See the
+official
+[PostgreSQL configuration](https://cloudnative-pg.io/documentation/current/postgresql_conf/)
+docs and the
+[postgres-extensions-containers](https://github.com/cloudnative-pg/postgres-extensions-containers)
+repo.
 
 **Percona Operator for PostgreSQL.** Add `pg_cron` as a custom extension package
 under `.spec.extensions.custom` and list it in the Patroni
 `shared_preload_libraries`. Applying the CR restarts the cluster Pods; then
 connect to the primary and `create extension pg_cron;` in each target database.
 You may need to host the extension package yourself for your Postgres major.
+See the official
+[custom extensions](https://docs.percona.com/percona-operator-for-postgresql/2.8.1/custom-extensions.html)
+docs.
 
 ## Tick rate
 
