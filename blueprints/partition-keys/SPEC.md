@@ -1,100 +1,96 @@
 # PgQue Partition Keys — Spec
 
-- **Version:** v0.3 (draft)
-- **Status:** review rounds 1 + 2 applied. Core model verified sound against the
-  engine (G1 ordering confirmed true; G2 lock confirmed real). Remaining fixes
-  from round 2 folded in. See §15 changelog and `decisions.md`.
+- **Version:** v0.4 (draft)
+- **Status:** review rounds 1–3 applied. **Phase 1 (`skip`-default partition
+  consumption) is converged / implementation-ready.** Phase 2 (`pause` strict
+  ordering) is specified but has open design items (§11) and is a deliberate
+  follow-up. See §15 changelog and `decisions.md`.
 - **Slug:** partition-keys
 - **Scope:** consumer-side ordered, parallel consumption by partition key.
-  Producer-side idempotency/dedup is a *separate* spec (deferred — §12).
+  Producer-side idempotency/dedup is a separate spec (deferred — §12).
 
 ---
 
 ## 1. Goal
 
-Add a **partition key** to PgQue so that, within one queue, events sharing a key
-are consumed **in order by a single worker at a time**, while events with
-different keys are consumed **in parallel** — the log-native ("Kafka partition")
-model: order *within* a key, parallelism *across* keys.
+Within one queue, events sharing a partition key are consumed **in order by a
+single worker at a time**; events with different keys are consumed **in
+parallel** — the log-native ("Kafka partition") model: order *within* a key,
+parallelism *across* keys.
 
 ## 2. The guarantee (precise, testable)
 
 - **G1 — per-key affinity + FIFO.** For a queue whose events carry a partition
-  key, and a fixed slot count `N`, every event of key `K` maps to exactly one
-  slot `slot(K) = (hashtextextended(K, 0) % N + N) % N` (the `+N` normalization
-  is mandatory — `hashtextextended` returns `bigint` and `%` of a negative value
-  is negative; round 2). Within that slot, non-retried events of `K` are
-  delivered in non-decreasing `ev_id` order, to **no other slot**.
-  - *Intra-batch order* is guaranteed by the engine's `order by 1` (= `ev_id`)
-    in `batch_event_sql` (`pgque.sql:440`), preserved through the
-    `get_batch_cursor` filter wrap (`pgque.sql:2277`). *Cross-batch order* for a
-    slot follows from sequential consumption of one subscription whose cursor
-    advances monotonically — **not** from `order by 1` (which is per-batch).
-- **G2 — single in-flight processor per key.** At any instant at most one worker
-  holds an unacked event for `K`. Enforced by the per-subscription receive lock
-  (`next_batch_custom` … `for update of s`, `pgque.sql:5761`), the same lock the
-  #97/#125 double-delivery guard relies on (`tests/two_session_receive_lock.sh`).
-- **G3 — failure boundary.** Under **`pause`**, no later event of `K` is
-  delivered until `K`'s failed head event is acked or dead-lettered; other keys
-  unaffected. Under **`skip`** (v0.1 default), later events of `K` MAY be
-  delivered before the failure resolves — only *at-least-once* holds.
-  - **Engine fact:** a retried event keeps its `ev_id` but gets a new `ev_txid`
+  key and a fixed slot count `N`, every event of key `K` maps to one slot
+  `slot(K) = (hashtextextended(K, 0) % N + N) % N` (the `+N` normalizes the sign;
+  `hashtextextended` returns `bigint`). Within that slot, non-retried events of
+  `K` are delivered in non-decreasing `ev_id` order, to **no other slot**.
+  Intra-batch order is the engine's `order by 1` (`pgque.sql:440`), preserved
+  through `get_batch_cursor`'s filter re-wrap (`pgque.sql:2277`); cross-batch
+  order follows from one subscription's monotonically-advancing cursor.
+- **G2 — single in-flight processor per key.** At most one worker holds an
+  unacked event for `K`. Enforced by the per-subscription receive lock
+  (`next_batch_custom … for update of s`, `pgque.sql:5761` — the #97/#125 guard).
+- **G3 — failure boundary (Phase 2 / `pause`).** Under `pause`, no later event of
+  `K` is delivered until `K`'s failed head event is acked or dead-lettered, and
+  after it resolves the deferred events deliver in `ev_id` order, exactly once.
+  Under `skip` (Phase 1 default), later events of `K` MAY arrive before the
+  failure resolves — only at-least-once holds.
+  - **Engine fact:** a retried event keeps its `ev_id`, gets a new `ev_txid`
     (re-injected by `maint_retry_events` → `insert_event_raw`, `pgque.sql:859`),
-    so it reappears in a *later* batch. Thus G1's `ev_id` monotonicity holds only
-    between non-retried events; across a retry the only guarantee is G3's pause
-    boundary. The retried event re-routes to the **same slot** because
-    `ev_extra1` is preserved through the retry path (verified `pgque.sql:2376`,
-    `:861`).
+    and re-routes to the **same slot** because `ev_extra1` is preserved
+    (`pgque.sql:861`). So G1's `ev_id` monotonicity holds only between non-retried
+    events; across a retry the only ordering guarantee is G3's pause boundary.
 
 ## 3. Why it's needed
 
-PgQue is an **ordered, immutable log**, not a job queue — workloads need
-**per-entity ordering without global ordering**. Motivating case (a multi-tenant
-storage service evaluating PgQue to replace pg-boss): millions of file-lifecycle
-events that **must be ordered per tenant** but need **no ordering across
-tenants**. One in-order consumer can't keep up; naive multi-worker consumption
-breaks per-tenant order.
+PgQue is an ordered, immutable **log**, not a job queue — workloads need
+per-entity ordering without global ordering. Motivating case (a multi-tenant
+storage service evaluating PgQue vs pg-boss): millions of file-lifecycle events
+that **must be ordered per tenant** but need **no ordering across tenants**.
 
-## 4. Scope and ICP
+## 4. Scope and phasing
 
-**In scope (v0.1 implementation):**
-- Partition key on a `send()`-sourced event.
+**Phase 1 — converged, build now:**
+- Partition key on a `send()`-sourced event (D1, D6).
 - N independent **slot consumers**, each filtering the stream to its hash class
-  (§6). Stable `(hashtextextended(key,0) % N + N) % N` affinity.
-- G1 + G2 always; **`skip` failure policy as the v0.1 default** (sound, stateless).
+  via `get_batch_cursor` `extra_where` (§6). Stable affinity (D4).
+- G1 + G2. **`skip` failure policy** (stateless, sound).
+- Persisted/enforced `N` (D3); slot identity + single-owner (D7); SECURITY
+  DEFINER ownership model (§6).
 
-**Deferred to v0.2 implementation (specified here, not built first):**
-- **`pause` failure policy** (G3 strict) — uses a compact blocked-key marker
-  (§7 D5, §8). Carries the crash/rotation risks (R1, R7); ships after `skip`.
+**Phase 2 — specified, follow-up (NOT converged):**
+- **`pause` failure policy** (G3 strict). Needs a *defer-without-retry-increment*
+  primitive that does not exist today (§11 O1), a durable blocked-key marker
+  (D5), and carries the hot-blocked-key cost (§11 O2). Build after Phase 1.
 
-**Out of scope:** producer idempotency (separate spec, §12); dynamic
-rebalancing / elastic `N` (§7 D3, R4); **trigger-sourced queues**
-(`jsontriga`/`logutriga`/`sqltriga` store the table name in `ev_extra1` — §7 D1,
-R5); cross-queue / cascaded partitioning; automatic hot-partition mitigation.
+**Out of scope:** producer idempotency (§12); dynamic `N` / rebalancing (R4);
+**trigger-sourced queues** (triggers use `ev_extra1` for the table name — D1, R5);
+cascaded/multi-node; automatic hot-partition mitigation.
 
 **ICP:** multi-tenant SaaS on managed Postgres with a high-volume per-entity
-event stream (entity = partition key: tenant, user, document, device).
+event stream (entity = partition key).
 
 ## 5. End-to-end workflow
 
 ```
 producer:  pgque.send('files', 'default', payload, partition_key => tenant_id)
-                       │  key → ev_extra1 (send-sourced queues only, v0.1)
+                       │  key → ev_extra1 (send-sourced queues only)
                        ▼
-engine:    append-only event tables · global ev_id/ev_txid order   (UNCHANGED)
+engine:    append-only tables · global ev_id/ev_txid order   (UNCHANGED)
                        │  full stream
                        ▼
 consumers: N slot consumers, each an INDEPENDENT subscription with its own cursor;
-           slot k reads the whole stream and server-side-filters to its hash class
+           slot k reads the whole stream, server-side-filtered to its hash class
 ```
 
 ## 6. Architecture
 
-The v0.1 mechanism is **N independent slot consumers**, *not* a modification of
-cooperative consumers (round 1 B1: coop hands each member a disjoint tick window
-and cannot fan one batch to N hash-filtered slots without dropping events on the
-shared cursor advance; confirmed `cooperative_consumers.sql`, `for update skip
-locked` victim-steal at `pgque.sql:6262`).
+The mechanism is **N independent slot consumers**, not a modification of
+cooperative consumers (round 1 B1: coop hands disjoint tick windows; confirmed
+`pgque.sql:6262`). Each slot is its own subscription → own cursor + `sub_id` → no
+cross-slot data loss; retry/DLQ rows are slot-scoped (`ev_owner = sub_id`,
+`pgque.sql:2374`).
 
 <!-- architecture:begin -->
 ```
@@ -105,206 +101,194 @@ locked` victim-steal at `pgque.sql:6262`).
  │ append-only tables · global ev_id/ev_txid · rotation      │
  │ next_batch / get_batch_cursor(i_extra_where) / order by 1 │
  └───────┬───────────────┬───────────────┬──────────────────┘
-         │ full stream    │ full stream    │ full stream
-         ▼                ▼                ▼
+         ▼ full stream    ▼ full stream    ▼ full stream
    slot 0 (sub#0/N)  slot 1 (sub#1/N)  slot N-1
    own cursor        own cursor        own cursor
    filter h%N=0      filter h%N=1      filter h%N=N-1
-   one worker        one worker        one worker
 ```
 <!-- architecture:end -->
 
 **Filtering without touching the engine.** Each slot's receive reuses the
-existing admin-only `pgque.get_batch_cursor(…, i_extra_where)` hook
-(`pgque.sql:2229`), injecting `and (hashtextextended(ev_extra1,0) % N + N) % N =
-k`. The fragment is assembled **only** from the validated integers `N`, `k`
-(§8) — never a caller string. `batch_event_sql`, `next_batch`, rotation are
-**not modified**; `get_batch_cursor`'s `order by 1` re-wrap preserves G1.
+admin-only `pgque.get_batch_cursor(…, i_extra_where)` hook (`pgque.sql:2229`,
+the 4-arg overload), injecting `and (hashtextextended(ev_extra1,0) % N + N) % N =
+k`, assembled only from the validated integers `N`,`k` (§8). `batch_event_sql`,
+`next_batch`, rotation are not modified; the filter re-wrap preserves G1.
 
-**Trust boundary (round 2).** `get_batch_cursor`'s `i_extra_where` is a
-documented *trusted-SQL sink*, revoked from `public/pgque_reader/pgque_writer`
-and granted to `pgque_admin` only (`pgque.sql:2221`, `:4852`). Therefore
-`receive_partitioned` and `subscribe_slot` are **`SECURITY DEFINER`, owned by the
-installer** (which holds the admin grant), exactly like `receive`/`nack`
-(`receive.sql`). The reader role gets EXECUTE on the *wrappers*, never on
-`get_batch_cursor`. Safety rests on the wrapper validating and integer-casting
-`N`,`k` and interpolating no caller-supplied value — **not** on "the string
-contains only integers."
+**SECURITY DEFINER ownership (round 3 — corrected).** `get_batch_cursor`'s
+`extra_where` is a trusted-SQL sink, revoked from `public/pgque_reader/
+pgque_writer`, admin-only (`pgque.sql:2221`, `:4852`). `receive_partitioned` and
+`subscribe_slot` reach it **because they are owned by the same role that owns
+`get_batch_cursor` (the install owner) — a function owner may execute its own
+functions regardless of grants.** This is *not* the `receive`/`nack` pattern
+(those never call `get_batch_cursor`; they call reader-granted internals), and it
+does *not* depend on the owner holding `pgque_admin`. **Invariant:** the
+partition functions MUST be created by the same role that ran `\i pgque.sql`. On
+managed Postgres the installer is a non-superuser admin role; co-ownership (not a
+grant) is what makes the wrapper work — state and test this explicitly.
 
-**Each slot is its own subscription** → its own cursor (`sub_last_tick`) and
-`sub_id` → no cross-slot data loss, and retry/DLQ rows are naturally slot-scoped
-(`ev_owner = sub_id`, `pgque.sql:2374`).
-
-**Known cost — read amplification.** Every event is scanned by all `N` slot
-cursors (each discards `(N-1)/N` after the hash filter; the filter is applied
-*after* the engine materializes the per-slot window, `pgque.sql:2277`, so it
-reduces returned rows, not scan work). Steady state ≈ **N×**; **up to ~2N×**
-during a rotation-overlap window (the engine's multi-table `union all`); a
-**stalled slot scans an ever-widening window** each poll. Documented;
-single-reader/dispatch optimization noted as future work (R6).
+**Read amplification.** Every event is scanned by all `N` slot cursors (filter
+applied after the engine materializes the window, `pgque.sql:2277` — reduces
+returned rows, not scan work). ≈ N× steady; up to ~2N× during rotation overlap;
+a stalled slot scans an ever-widening window. Documented; single-reader/dispatch
+optimization is future (R6).
 
 ## 7. Decisions
 
-| ID | Decision | Choice (v0.3) | Rationale / round-2 change |
-|----|----------|---------------|----------------------------|
-| D1 | Where the key lives | `ev_extra1`, **`send()`-sourced queues only** | Triggers use `ev_extra1` for the table name. |
-| D2 | Failure policy | `skip` default (v0.1); `pause` ships v0.2 | `pause` needs the blocked-key marker (D5). |
-| D3 | Elasticity & N | Fixed `N`, **persisted in a `pgque.partition_consumer(queue, consumer, n)` row**; a worker registering a different `n` is **rejected** | "Fixed N" is an enforced invariant, not a convention. N lives outside the slot names (which encode it) so a *new* slot can be validated. |
-| D4 | Assignment | `(hashtextextended(key, 0) % N + N) % N` | `hashtextextended` is the stable, documented hash; the `+N` normalizes the sign (round 2). |
-| D5 | State budget | **Happy path & `skip`: no state.** `pause`: a compact `pgque.partition_block(sub_id, partition_key, head_ev_id)` marker, written on first failure, cleared on ack-or-DLQ | Round 2 (B-R2-2) proved `retry_queue` is transient (deleted by `maint_retry_events`, `pgque.sql:863`) so it can't be the durable blocked-set. The marker is O(*concurrently-failing keys*) — proportional to failures, **not** throughput, so it is not pg-boss-style per-event churn. Honestly reopens "no new table," scoped to `pause`. |
-| D6 | Producer signature | `send(queue, type, payload, partition_key => text)` (new 4-arg overload) | Avoids collision with `send(queue, type, payload)`. |
-| D7 | Slot identity & single-owner | slot = consumer `"<consumer>#k/N"`; G2 via the per-subscription receive lock. `receive_partitioned`/`subscribe_slot` are `SECURITY DEFINER` (§6) | Defines what a slot is and what makes G2 true and reader-callable. |
+| ID | Decision | Choice (v0.4) | Notes |
+|----|----------|---------------|-------|
+| D1 | Key location | `ev_extra1`, `send()`-sourced queues only | Triggers use `ev_extra1` for table name. |
+| D2 | Failure policy | `skip` default (Phase 1); `pause` is Phase 2 (§11) | `pause` has open mechanics. |
+| D3 | N | Fixed, persisted in `pgque.partition_consumer(queue, consumer, n)` (written inside SECURITY DEFINER `subscribe_slot`; table revoked from app roles); changed `n` rejected | Enforced invariant, not convention. |
+| D4 | Assignment | `(hashtextextended(key,0) % N + N) % N` | Stable, sign-safe. |
+| D5 | State budget | **Phase 1 / happy / `skip`: no state, no per-event writes.** **Phase 2 `pause`:** durable `pgque.partition_block(sub_id, partition_key, head_ev_id)` marker (FK `sub_id → subscription on delete cascade`; index `(sub_id, partition_key)`). Blocked keys additionally incur defer churn (§11 O1) — so "no per-event churn" is a Phase-1/non-blocked-key claim only. | Round 3 corrected the churn framing. |
+| D6 | Producer signature | `send(queue, type, payload, partition_key => text)` | Avoids `send(queue,type,payload)` collision. |
+| D7 | Slot & single-owner | slot = consumer `"<consumer>#k/N"`; G2 via per-subscription receive lock; functions SECURITY DEFINER co-owned with `get_batch_cursor` (§6) | Reader-callable, owner-reachable. |
 
 ## 8. Implementation details
 
-- **Producer:** `pgque.send(queue, type, payload, partition_key text default
-  null)` → `insert_event(queue, type, payload, ev_extra1 => partition_key, …)`.
-  `SECURITY DEFINER set search_path = pgque, pg_catalog`; revoke from public,
-  grant `pgque_writer`.
-- **Slot registration:** `pgque.subscribe_slot(queue text, consumer text, k int,
-  n int)` — validates `n >= 1 and 0 <= k < n` (raises otherwise), upserts the
-  persisted `n` for `(queue, consumer)` and **rejects a changed `n`** (D3),
-  registers subscription `"<consumer>#k/n"`. Idempotent for the same `(k,n)`.
-- **Partitioned receive:** `pgque.receive_partitioned(queue, consumer, k int, n
-  int, …)` — after validating/casting `k,n` to int, calls `next_batch` +
-  `get_batch_cursor(…, i_extra_where => format('and (hashtextextended(ev_extra1,0)
-  %% %s + %s) %% %s = %s', n, n, n, k))`. Under `pause`, the wrapper also
-  withholds events whose key has an open `partition_block` row for this `sub_id`
-  with `head_ev_id < ev_id`. `SECURITY DEFINER` (§6); granted `pgque_reader`.
-- **`pause` lifecycle (v0.2):** on nack of `K#i`, upsert
-  `partition_block(sub_id, K, head_ev_id => ev_id)`. The row is **durable**, so
-  it survives a crash with no reconstruction. Clear it when `K#i` is acked
-  (success after retry) **or** dead-lettered — unblock predicate: ack, OR a
-  `dead_letter` row exists for `(dl_consumer_id = this slot, ev_id = K#i)`
-  (`event_dead`, `dlq.sql`). So a poison key cannot wedge past `max_retries`.
-- **`pause` must not hold the batch open** (R7): it acks the batch and tracks
-  blocked keys via `partition_block`, so the slot's cursor keeps advancing past
-  *non-blocked* keys and does not pin rotation.
-- **Teardown:** `pgque.unsubscribe_slot(queue, consumer, k, n)` removes the slot
-  subscription; full-consumer teardown removes all N + the
-  `partition_consumer`/`partition_block` rows. **Caveat:** `unregister_consumer`
-  cascades `dead_letter` (`on delete cascade`), so tearing down a slot drops that
-  slot's DLQ audit — documented.
-- **Grants:** producer overload → `pgque_writer`; `subscribe_slot` /
-  `unsubscribe_slot` / `receive_partitioned` → `pgque_reader`. Deny-by-default
-  re-applied. `get_batch_cursor` stays revoked from all app roles.
+- **Producer:** `send(queue, type, payload, partition_key text default null)` →
+  `insert_event(…, ev_extra1 => partition_key, …)`. SECURITY DEFINER, pinned
+  search_path; revoke public, grant `pgque_writer`.
+- **Tables (created in Phase 1, `if not exists`):** `partition_consumer`
+  (N persistence) and `partition_block` (Phase-2 marker, empty in Phase 1 so
+  test assertions are well-formed). Both revoked from app roles (the
+  `dead_letter` pattern, `dlq.sql:236`); written only inside SECURITY DEFINER
+  functions.
+- **`subscribe_slot(queue, consumer, k int, n int)`:** validate `n>=1 and
+  0<=k<n`; upsert persisted `n`, reject a changed `n` (D3); register
+  `"<consumer>#k/n"`. Idempotent for the same `(k,n)`.
+- **`receive_partitioned(queue, consumer, k int, n int, …)`:** after casting
+  `k,n` to int, `next_batch` + `get_batch_cursor(…, i_extra_where =>
+  format('and (hashtextextended(ev_extra1,0) %% %s + %s) %% %s = %s', n,n,n,k))`.
+  SECURITY DEFINER (§6); granted `pgque_reader`.
+- **`pause` (Phase 2):** on nack of `K#i`, upsert `partition_block(sub_id, K,
+  head_ev_id => ev_id)`. A later event of a blocked key (open marker with
+  `head_ev_id < ev_id`) is **deferred** (see §11 O1 for the missing primitive),
+  not server-side-dropped (dropping + cursor-advance would lose it). Clear the
+  marker when `K#i` is acked, **or** when it is dead-lettered — DLQ-unblock
+  predicate: a `dead_letter` row exists for `ev_id = K#i` and `dl_consumer_id`
+  equal to this slot's `co_id`, where the slot's `co_id` is obtained by joining
+  `subscription` (`partition_block.sub_id → subscription.sub_consumer =
+  dead_letter.dl_consumer_id`) — `sub_id` and `co_id` are different ID spaces
+  (`dlq.sql:24,75-85`, `pgque.sql:170-183`); do not compare them directly.
+- **Teardown:** `unsubscribe_slot` removes the slot subscription (the
+  `partition_block` FK cascades). Note `unregister_consumer` cascades
+  `dead_letter` (`dlq.sql:24`), so dropping a slot drops its DLQ audit —
+  documented.
+- **Grants:** producer → `pgque_writer`; `subscribe_slot`/`unsubscribe_slot`/
+  `receive_partitioned` → `pgque_reader`; `partition_consumer`/`partition_block`
+  revoked from all app roles; `get_batch_cursor` stays admin-only. Deny-by-default
+  re-applied.
 
-## 9. Tests plan (red/green TDD)
+## 9. Tests plan (red/green TDD), CI PG 14–18
 
-CI matrix PG 14–18. Write the failing test first.
-
-- **T-G1a (affinity, stable):** assert the literal `(hashtextextended(K,0)%N+N)%N`
-  on **every** CI PG version, pinning one concrete `(K, expected)` pair so a hash
-  drift is caught even if all versions move together. *(red first)*
-- **T-G1b (per-key FIFO):** interleave A,B,A,A,B; assert each key in `ev_id` order
-  across batches, no key on two slots. *(No existing test guards intra-batch
-  ev_id order — this is new and load-bearing.)*
-- **T-retry-affinity (new, round 2):** nack a keyed event; run
-  `maint_retry_events()` + `force_next_tick` + `ticker()`; assert it redelivers
-  to the **same** slot `k` and no other. *(The core correctness property under
-  retry.)*
-- **T-G2-block:** two workers on the **same** slot → second blocks on the
-  subscription lock (mirror `tests/two_session_receive_lock.sh`).
-- **T-G2-parallel:** two workers on **different** slots → neither blocks (the
-  parallelism half).
-- **T-no-drop:** keys spanning all slots in one tick window; run all N slots;
-  union delivered = all events, zero loss.
-- **T-security (new, round 2):** a bare `pgque_reader` can call
-  `receive_partitioned`/`subscribe_slot` end-to-end; and `pgque_reader` **cannot**
-  call `get_batch_cursor` directly (mirror
-  `tests/test_security_get_batch_cursor.sql`); `receive_partitioned` rejects a
-  non-integer/out-of-range `n`/`k`.
-- **T-G3-pause (order-after-retry):** A#2 nacked (`pause`); drive
-  `maint_retry_events()` + tick; assert A#3 withheld until A#2 acked-or-DLQ'd; B
-  unaffected.
-- **T-DLQ-unblock:** A#2 exhausts retries → `dead_letter`; assert A#3 then
-  proceeds.
-- **T-slot-crash:** worker holding A#2 (and its `partition_block` row) dies; a
-  new worker takes slot k; drive maint+tick; assert A#2 redelivered before A#3
-  and only to slot k. *(Crash specifically in the post-`maint` window where the
-  `retry_queue` row is already gone — the round-2 hole.)*
-- **T-G3-skip (reorder boundary):** with `skip`, assert the exact permitted
-  reorder after A#2 fails.
-- **T-N-invariant (new, round 2):** `subscribe_slot(…,k,n)` is idempotent;
-  `subscribe_slot(…,k,n2≠n)` raises.
-- **T-empty-slot / T-hot-key:** an empty slot doesn't wedge others; a hot key
-  saturates one slot while others drain.
-- **T-no-bloat (happy path):** all-ack processing of M events adds zero
-  `retry_queue`/`dead_letter`/`partition_block` rows and no per-event
-  UPDATE/DELETE. (Failure path legitimately writes — out of scope here.)
+**Phase 1 (must pass to ship):**
+- **T-G1a:** literal `(hashtextextended(K,0)%N+N)%N` on every CI version, pinning
+  one concrete `(K, expected)` pair. *(red first)*
+- **T-G1b:** interleave A,B,A,A,B → each key in `ev_id` order across batches, no
+  key on two slots. (No existing test guards intra-batch `ev_id` order.)
+- **T-retry-affinity:** nack a keyed event; `maint_retry_events()` +
+  `force_next_tick` + `ticker()`; assert redelivery to the **same** slot only.
+- **T-G2-block / T-G2-parallel:** same slot → second worker blocks (mirror
+  `two_session_receive_lock.sh`); different slots → neither blocks.
+- **T-no-drop:** keys across all slots in one window; all N slots; union = all
+  events, zero loss.
+- **T-security:** run against an install whose owner is a **non-superuser,
+  non-`pgque_admin` role** — a bare `pgque_reader` can call
+  `receive_partitioned`/`subscribe_slot` end-to-end, and **cannot** call
+  `get_batch_cursor` directly (`42501`, mirror `test_security_get_batch_cursor.sql`);
+  non-integer/out-of-range `n`,`k` rejected.
+- **T-N-invariant:** `subscribe_slot(…,k,n)` idempotent; `(…,k,n2≠n)` raises.
+- **T-no-bloat (happy path):** all-ack of M events → zero `retry_queue`/
+  `dead_letter`/`partition_block` rows (guard the `partition_block` clause with
+  `to_regclass('pgque.partition_block') is not null`) and no per-event
+  UPDATE/DELETE.
 - **T-engine-untouched:** `pg_get_functiondef` of `batch_event_sql`,
-  `next_batch_custom`, **and `get_batch_cursor`** (round 2 — the slot model
-  depends on its `order by 1` re-wrap) byte-identical to baseline.
-- **T-idempotent-install:** re-running `pgque.sql` re-creates the partition
-  functions/tables cleanly.
+  `next_batch_custom`, and `get_batch_cursor/4` (pin the 4-arg overload)
+  byte-identical to baseline.
+- **T-idempotent-install:** re-running `pgque.sql` re-creates functions + the two
+  new tables (`create table/unique index if not exists`) cleanly.
 
-## 10. Risks and open questions
+**Phase 2 (`pause`) — write when O1/O2 (§11) resolve:**
+- **T-G3-pause:** A#2 nacked; drive maint+tick; A#3 withheld until A#2
+  acked-or-DLQ'd; **and after unblock A#2 then A#3 deliver in `ev_id` order,
+  exactly once**; B unaffected.
+- **T-DLQ-unblock:** A#2 exhausts retries → `dead_letter`; assert the
+  `partition_block` row for A drops to 0 **via the DLQ branch (no ack ever
+  occurred)** and A#3 then proceeds.
+- **T-slot-crash:** worker holding A#2 dies; assert the `partition_block` row is
+  present after the crash and before the new worker's first receive (durability);
+  drive maint+tick; A#2 redelivered before A#3, only to slot k. Crash in the
+  post-`maint` window (retry_queue row already gone).
+- **T-hot-blocked-key:** hot `K` blocked under `pause` → other slots unaffected;
+  defer cost is bounded by `K`'s backlog until DLQ, not total throughput.
 
-- **R1 — `pause` crash safety: resolved by D5's durable `partition_block`
-  marker** (round 2 B-R2-2). Test: T-slot-crash with the crash in the
-  post-`maint` window.
-- **R2 — read amplification:** N× steady, ~2N× during rotation overlap,
-  unbounded-width for a stalled slot (§6). Benchmark the stalled case, not just
-  uniform N.
-- **R3 — hot partitions:** one hot key saturates its slot; documented only.
-- **R4 — changing N:** an enforced invariant (D3); true rebalancing is future.
-- **R5 — `ev_extra1` semantics:** restricted to `send()`-sourced queues; a
-  dedicated partition-key column is future work.
-- **R6 — single-reader/dispatch optimization** to remove read amplification;
-  adds a hop/state, out of v0.1's budget.
-- **R7 — rotation wedge (round 2):** rotation waits for `min(sub_last_tick)` over
-  ALL subscriptions (`pgque.sql:910`); N slots lower that floor to the slowest
-  slot, and a wedged `pause` slot could pin rotation for the whole queue →
-  unbounded data growth. Mitigated by §8 ("`pause` does not hold the batch open";
-  cursor advances past non-blocked keys) + an alert on per-slot staleness.
+## 10. Risks
 
-## 11. (reserved)
+- **R2 — read amplification:** N× steady, ~2N× rotation overlap, widening for a
+  stalled slot. Benchmark the stalled case.
+- **R3 — hot partitions:** documented only.
+- **R4 — changing N:** enforced invariant (D3); rebalancing is future.
+- **R5 — `ev_extra1`:** send-sourced queues only.
+- **R6 — single-reader/dispatch** to remove read amplification; future.
+- **R7 — rotation pressure:** rotation waits for `min(sub_last_tick)` over ALL
+  subscriptions (`pgque.sql:910`); N slots lower the floor to the slowest slot. A
+  `pause`-blocked slot does *not* pin rotation (deferred events go to retry, not
+  the held cursor), **but** a hot blocked key keeps that slot perpetually lagging,
+  so a per-slot staleness alert cannot distinguish "wedged" from "hot key under
+  pause" — documented, not auto-mitigated.
+
+## 11. Open design items — Phase 2 `pause` (why it's a follow-up)
+
+- **O1 — defer-without-retry-increment primitive (blocking for `pause`).**
+  `finish_batch` acks the whole batch, so withholding `K#i+1` requires removing it
+  from the batch. A **server-side filter that lets the cursor advance would lose
+  it** (round-2 data-loss). `event_retry` preserves it but **increments
+  `ev_retry`**, so a long-blocked key's deferred events would falsely march toward
+  `max_retries`/DLQ. `pause` therefore needs a new "re-queue without counting as a
+  retry" path (or a hold-cursor design that doesn't wedge rotation). Undecided.
+- **O2 — hot-blocked-key cost.** Until O1 is settled, a hot blocked key makes its
+  slot re-defer a growing backlog each poll (per-event churn for that key,
+  bounded by the head's time-to-DLQ). Acceptable for rare failures (the migration
+  ICP); needs documentation + T-hot-blocked-key before `pause` ships.
 
 ## 12. Relationship to producer idempotency (deferred sibling)
 
-Producer-side dedup is a **TTL window** (SQS/NATS model), append-only, GC'd by
-rotation — a separate spec. In a log, "processed" is a per-consumer fact the
-producer cannot see, so dedup is a producer-side time window while
-ordering/serialization is this consumer-side feature. Rationale and prior art:
-`blueprints/idempotency/DESIGN.md`.
+Producer dedup is a TTL window (SQS/NATS), append-only, GC'd by rotation — a
+separate spec. Rationale: `blueprints/idempotency/DESIGN.md`.
 
-## 13. Team of veteran experts (review panel)
+## 13. Review panel
 
-- **Lead:** drafts/revises (this document).
-- **Reviewer A — ops/security:** rounds 1 + 2 applied (security trust boundary,
-  blocked-set durability, rotation wedge, modulo sign).
-- **Reviewer B — QA/testability:** rounds 1 + 2 applied (confirmed G1 ordering +
-  G2 lock; grant/DEFINER wiring; retry-affinity, security, N-invariant tests).
+- **Lead:** drafts/revises.
+- **Reviewer A — ops/security** · **Reviewer B — QA/testability.** Rounds 1–3
+  applied. Round 3 verdict: Phase 1 converged; Phase 2 (`pause`) has open items
+  O1/O2 → split out as follow-up.
 
 ## 14. Sprint plan
 
-1. **S1 — producer + key plumbing:** `send(…, partition_key =>)` on
-   send-sourced queues. Tests T-G1a, T-no-bloat(happy), T-idempotent-install.
-2. **S2 — slot consumers (`skip` default):** `subscribe_slot` (persisted N, D3),
-   `receive_partitioned` via `get_batch_cursor` `extra_where` (`SECURITY
-   DEFINER`, D7), teardown. Tests T-G1b, T-retry-affinity, T-G2-block,
-   T-G2-parallel, T-no-drop, T-security, T-N-invariant, T-G3-skip,
-   T-engine-untouched.
-3. **S3 — `pause` policy (v0.2):** `partition_block` marker; DLQ-unblock; "no held
-   batch" (R7). Tests T-G3-pause, T-DLQ-unblock, T-slot-crash.
-4. **S4 — docs + benchmark:** throughput vs N; read-amp (steady, rotation,
-   stalled); per-tenant order under load.
+1. **S1 — producer + key plumbing** (+ the two tables, empty). T-G1a,
+   T-no-bloat(happy), T-idempotent-install.
+2. **S2 — slot consumers (`skip`), SECURITY DEFINER + co-ownership, persisted N.**
+   T-G1b, T-retry-affinity, T-G2-block/parallel, T-no-drop, T-security,
+   T-N-invariant, T-engine-untouched. **← Phase 1 ships here.**
+3. **S3 — `pause` (Phase 2), gated on O1/O2.** T-G3-pause, T-DLQ-unblock,
+   T-slot-crash, T-hot-blocked-key.
+4. **S4 — docs + benchmark** (read-amp: steady/rotation/stalled; per-tenant order).
 
 ## 15. Changelog
 
-- **v0.3 (draft):** review round 2 applied. **Confirmed G1 ordering is true**
-  (engine `order by 1`, preserved through `get_batch_cursor`) and the G2 lock is
-  real/tested. Fixed: (security) `receive_partitioned`/`subscribe_slot` are
-  `SECURITY DEFINER` over the admin-only `get_batch_cursor`, with integer
-  validation and the real trust-boundary argument (B-R2-1); (correctness)
-  `pause` blocked-set moved from the transient `retry_queue` to a durable compact
-  `partition_block` marker (B-R2-2 / D5); (bug) modulo normalized
-  `(h%N+N)%N` (D4); added R7 rotation-wedge + "no held batch"; specified N
-  persistence + teardown + DLQ-cascade caveat (D3); explicit DLQ-unblock
-  predicate. Added tests: T-retry-affinity, T-security, T-N-invariant, split
-  T-G2 block/parallel, `get_batch_cursor` in T-engine-untouched, pinned hash
-  pair. Round-2 decisions in `decisions.md`.
-- **v0.2 (draft):** review round 1 — re-grounded the mechanism to N independent
-  slot subscriptions; restated G1/G2/G3; corrected retry rationale; `skip`
-  default. (Full detail in `decisions.md`.)
-- **v0.1 (draft):** initial single-pass SamoSpec-format draft.
+- **v0.4 (draft):** review round 3. **Phase 1 declared converged /
+  implementation-ready; `pause` split into Phase 2** with explicit open items
+  (§11 O1 defer-without-retry-increment, O2 hot-blocked-key). Corrected the
+  SECURITY DEFINER justification to the **co-ownership** invariant (not
+  `pgque_admin`; not "like receive/nack") + non-superuser-owner security test
+  (round 3 B1). Fixed the DLQ-unblock `sub_id`↔`co_id` join; added
+  `partition_block` FK-cascade + index + revoked-from-roles; tables created empty
+  in Phase 1; `T-no-bloat` guarded with `to_regclass`; `T-engine-untouched` pins
+  the `/4` overload; `T-G3-pause` now asserts in-order-exactly-once after unblock;
+  `T-DLQ-unblock` asserts marker-clear-via-DLQ; `T-slot-crash` asserts marker
+  durability; added `T-hot-blocked-key`. Round-3 detail in `decisions.md`.
+- **v0.3:** round 2 — confirmed G1 ordering + G2 lock real; SECURITY DEFINER
+  wiring; durable `partition_block`; modulo sign fix; R7.
+- **v0.2:** round 1 — N independent slot subscriptions; G1/G2/G3; `skip` default.
+- **v0.1:** initial SamoSpec-format draft.

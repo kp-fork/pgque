@@ -76,8 +76,8 @@
     <h1>Partition Keys<span class="sub">Ordered, parallel consumption — the log-native way</span></h1>
     <div class="badges">
       <span class="badge">slug <b>partition-keys</b></span>
-      <span class="badge">version <b>v0.3 (draft)</b></span>
-      <span class="badge badge--amber">review <b>rounds 1+2 applied</b></span>
+      <span class="badge">version <b>v0.4 (draft)</b></span>
+      <span class="badge badge--amber">Phase 1 <b>converged</b></span>
       <span class="badge">engine <b>untouched</b></span>
     </div>
   </header>
@@ -172,18 +172,18 @@
   <h2><span class="n">04</span>Scope</h2>
   <div class="two">
     <div class="panel">
-      <p class="card-title">In · v0.1</p>
+      <p class="card-title">Phase 1 · converged, build now</p>
       <ul class="tight yes">
         <li>Partition key on <code>send()</code>-sourced events</li>
-        <li>Stable <code>hashtextextended(key,0) % N</code> affinity</li>
+        <li>N independent slot consumers, stable affinity</li>
         <li>Per-key order + single processor (G1, G2)</li>
         <li><code>skip</code> failure policy (default)</li>
       </ul>
     </div>
     <div class="panel">
-      <p class="card-title">Deferred / out</p>
+      <p class="card-title">Phase 2 · follow-up / out</p>
       <ul class="tight">
-        <li><code>pause</code> policy — specified, ships v0.2</li>
+        <li><code>pause</code> strict order — open mechanic (defer w/o retry-count)</li>
         <li>Producer idempotency / dedup window</li>
         <li>Trigger-sourced queues · dynamic N</li>
         <li>Hot-partition mitigation · read-amp optimization</li>
@@ -196,7 +196,7 @@
     <thead><tr><th>ID</th><th>Decision</th><th>Choice (v0.2)</th></tr></thead>
     <tbody>
       <tr><td class="id">D1</td><td>Where the key lives</td><td class="pick"><code>ev_extra1</code>, <code>send()</code>-sourced queues only</td></tr>
-      <tr><td class="id">D2</td><td>Failure policy</td><td class="pick"><code>skip</code> default; <code>pause</code> ships v0.2</td></tr>
+      <tr><td class="id">D2</td><td>Failure policy</td><td class="pick"><code>skip</code> default (Phase 1); <code>pause</code> = Phase 2</td></tr>
       <tr><td class="id">D3</td><td>Slot count N</td><td class="pick">Fixed, persisted &amp; enforced per (queue, consumer)</td></tr>
       <tr><td class="id">D4</td><td>Assignment function</td><td class="pick"><code>(hashtextextended(key,0) % N + N) % N</code> (stable, sign-safe)</td></tr>
       <tr><td class="id">D5</td><td>State budget</td><td class="pick">Happy path &amp; <code>skip</code>: none. <code>pause</code>: a compact blocked-key marker (per failing key, not per event)</td></tr>
@@ -204,7 +204,7 @@
       <tr><td class="id">D7</td><td>Slot &amp; single-owner</td><td class="pick">slot = consumer <code>"&lt;c&gt;#k/N"</code>; receive lock</td></tr>
     </tbody>
   </table>
-  <p class="note">Round 1 re-grounded the mechanism (slots are independent subscriptions, not a coop overlay). Round 2 verified it against the engine: G1's <code>ev_id</code> ordering is real (<code>order by 1</code>, preserved through the filter) and the G2 single-owner lock is the tested #97 double-delivery guard. It also corrected the security trust boundary (the filter hook is admin-only, so the consumer wrappers are <code>SECURITY DEFINER</code>) and moved <code>pause</code>'s blocked-set to a durable per-failing-key marker.</p>
+  <p class="note">Three review rounds against the real engine. Round 2 verified G1's <code>ev_id</code> ordering and the G2 single-owner lock are real. Round 3 declared <strong>Phase 1 (skip) converged / implementation-ready</strong> and split <code>pause</code> out as a follow-up: withholding a blocked key's later event has an unsolved mechanic — a server-side drop would lose the event, and <code>event_retry</code> would wrongly count it toward DLQ — so strict <code>pause</code> needs a defer-without-retry-increment primitive that doesn't exist yet. It also corrected the security model: the filter hook is admin-only, so the consumer wrappers reach it by <em>co-ownership</em> with the installer, not by a role grant.</p>
 
   <h2><span class="n">06</span>Sprint plan</h2>
   <div class="pill-row">
@@ -214,10 +214,10 @@
     <span class="pill"><b>S4</b> &nbsp;docs + read-amp benchmark</span>
   </div>
   <p>
-    Open for round 2: the exact <code>retry_queue</code> predicate that rebuilds a slot's
-    blocked-key set after a crash (the crux of crash-safe <code>pause</code>), and whether
-    N&#215; read amplification at target throughput justifies a single-reader/dispatch
-    optimization in v0.1.
+    Phase 1 (S1–S2) is the converged, build-now slice. Phase 2 (S3, <code>pause</code>)
+    is gated on two open items: a defer-without-retry-increment primitive (O1) and
+    bounding the hot-blocked-key cost (O2). Phase 1 alone covers the per-tenant
+    ordered, parallel consumption the motivating workload needs.
   </p>
 
   <footer>
@@ -232,7 +232,7 @@
       PgQue — zero-bloat PostgreSQL queue · <a href="https://pgque.dev">pgque.dev</a> ·
       <a href="https://github.com/NikolayS/pgque">github.com/NikolayS/pgque</a>
     </p>
-    <p class="note">Drafted in SamoSpec format; review rounds 1 + 2 (ops/security + QA/testability personas) applied. The live multi-model CLI loop was not run in this environment.</p>
+    <p class="note">Drafted in SamoSpec format; review rounds 1–3 (ops/security + QA/testability personas) applied — Phase 1 converged. The live multi-model CLI loop was not run in this environment.</p>
   </footer>
 
 </div>

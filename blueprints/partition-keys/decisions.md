@@ -97,8 +97,49 @@ Accepted / rejected / deferred choices, tracked across review rounds.
   B4 (D2-vs-state / send sig) ✅ closed · B5 (DLQ-unblock / slot definition)
   ✅ closed; spawned B-R2-1 (now fixed) · B6 ✅ closed.
 
-## Still open (for round 3, if run)
-- Bench numbers for read amplification (steady N× vs ~2N× rotation vs stalled
-  slot) to decide if R6 (single-reader/dispatch) is needed in v0.1.
-- Exact `partition_block` withhold predicate wording in `receive_partitioned`
-  (server-side `not exists` vs worker-side filter).
+## Review round 3 (convergence; both personas verified against the engine)
+
+### Verdict
+**Phase 1 (`skip`-default partition consumption) CONVERGED / implementation-ready.
+Phase 2 (`pause`) NOT converged — split out as a follow-up** with open items O1/O2.
+Both reviewers agreed the round-2 engine-anchor and security *posture* are solid;
+the remaining gaps are all in the new `pause`/DLQ surface.
+
+### Accepted → v0.4
+- **B1 (security ownership, affects Phase 1).** The "SECURITY DEFINER owned like
+  receive/nack" justification was wrong: `receive`/`nack` never call
+  `get_batch_cursor`. The real mechanism is **co-ownership** — a function owner
+  may execute its own functions regardless of grants, so `receive_partitioned`
+  reaches the admin-only `get_batch_cursor` only because the install owner owns
+  both. Not `pgque_admin` membership. Invariant: partition functions created by
+  the `\i pgque.sql` owner. Test under a non-superuser owner. (§6, D7, T-security)
+- **The `pause` withhold mechanic is genuinely unsolved (O1).** Combining the two
+  reviewers: a server-side filter that advances the cursor **loses** the withheld
+  event (data loss); `event_retry` preserves it but **increments `ev_retry`**, so
+  deferred events of a long-blocked key march toward false DLQ. `pause` needs a
+  *defer-without-retry-increment* primitive that does not exist. → `pause` is
+  Phase 2; O1 is its blocking open item. (§11 O1)
+- **Hot-blocked-key cost (O2).** Until O1, a hot blocked key re-defers a growing
+  backlog per poll (bounded by head's time-to-DLQ). Document + T-hot-blocked-key.
+- **DLQ-unblock ID-space join.** Marker keyed on `sub_id`; `dead_letter.dl_consumer_id`
+  is `co_id`. Must join `subscription` to map; do not compare directly. (§8)
+- **`partition_block` hygiene:** FK `sub_id → subscription on delete cascade`
+  (no orphans), index `(sub_id, partition_key)`, revoked from app roles, created
+  empty in Phase 1 so `T-no-bloat` is well-formed (guard with `to_regclass`). (§8, D5)
+- **Test tightening:** `T-engine-untouched` pins the `get_batch_cursor/4` overload;
+  `T-G3-pause` asserts in-order-exactly-once after unblock; `T-DLQ-unblock`
+  asserts marker-clear-via-DLQ-branch (no ack); `T-slot-crash` asserts marker
+  durability; `T-security` runs under a non-superuser owner. (§9)
+- **N persistence writer/grants:** `partition_consumer` written inside
+  SECURITY DEFINER `subscribe_slot`; table revoked from app roles. (D3, §8)
+
+### Round closure
+B-R2-1 security: posture closed, ownership prose corrected (B1). B-R2-2 durable
+marker: direction correct; hygiene (FK/index/grants) + the withhold mechanic (O1)
+now specified/flagged. All round-1 + round-2 *Phase-1* items closed.
+
+## Still open (Phase 2 `pause`, before it can be built)
+- **O1** — choose the defer-without-retry-increment mechanism (new primitive vs
+  hold-cursor-without-wedging-rotation).
+- **O2** — bound + document the hot-blocked-key degradation.
+- Read-amplification bench numbers (R2) to decide if R6 is needed.
