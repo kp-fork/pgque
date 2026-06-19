@@ -54,8 +54,51 @@ Accepted / rejected / deferred choices, tracked across review rounds.
 - **Modifying `batch_event_sql`** to push partitioning into the engine — violates
   the sacred-engine rule; the `extra_where` hook achieves filtering without it.
 
-## Open (for round 2)
+## Review round 2 (both personas, verified against the engine)
 
-- Exact `retry_queue` predicate for `pause` blocked-set reconstruction at slot
-  start (R1).
-- Whether read amplification at target throughput justifies R6 in v0.1.
+### Confirmed sound (no change needed)
+- **G1 `ev_id` ordering is true.** `batch_event_sql` emits `order by 1`
+  (`pgque.sql:440`); `get_batch_cursor` re-wraps the filtered stream with
+  `order by 1` (`pgque.sql:2277`) → per-key order survives the filter, no
+  consumer sort. (Reviewer B headline.)
+- **G2 single-owner lock is real and tested** — `next_batch_custom … for update
+  of s` (`pgque.sql:5761`), guarded by `two_session_receive_lock.sh`.
+- **Retry affinity holds** — `ev_extra1` preserved through `event_retry` /
+  `maint_retry_events`, so a retried event re-routes to the same slot.
+- **Coop genuinely hands disjoint windows** (`for update skip locked`,
+  `pgque.sql:6262`) — confirms round-1 A1.
+
+### Accepted (changed the spec → v0.3)
+- **B-R2-2 — `pause` blocked-set must be durable.** `retry_queue` is transient
+  (`maint_retry_events` deletes the row on re-injection, `pgque.sql:863`),
+  leaving a crash hole that violates G3. → durable
+  `partition_block(sub_id, partition_key, head_ev_id)` marker, O(failing keys),
+  cleared on ack-or-DLQ. Honestly reopens "no new table," scoped to `pause`.
+  (D5, §8, R1)
+- **B-R2-1 — security trust boundary.** `get_batch_cursor.extra_where` is an
+  admin-only trusted-SQL sink (`pgque.sql:2221`, `:4852`). → `receive_partitioned`
+  / `subscribe_slot` are `SECURITY DEFINER` installer-owned; integers `n,k`
+  validated + cast; no caller string interpolated. Reframed the "injection-safe"
+  prose. (§6, §8, D7; test T-security)
+- **Negative modulo bug** — `hashtextextended` returns `bigint`; bare `% N` can
+  be negative → `(h % N + N) % N`. (D4, §6, §8)
+- **R7 rotation wedge** — N slots lower the rotation floor to the slowest slot; a
+  wedged `pause` slot could pin rotation for the whole queue. → `pause` must not
+  hold the batch open; cursor advances past non-blocked keys. (R7, §8)
+- **N persistence + teardown** — N persisted in `partition_consumer`;
+  `unsubscribe_slot` + DLQ-cascade caveat. (D3, §8)
+- **Tests** — added T-retry-affinity, T-security, T-N-invariant; split T-G2 into
+  block/parallel; added `get_batch_cursor` to T-engine-untouched; pinned a
+  concrete hash pair. (§9)
+
+### Round-1 closure scorecard (both reviewers)
+- B1 (coop model) ✅ closed · B2 (retry rationale) ✅ closed · B3 (crash-derive
+  blocked set) ♻️ reopened in v0.2, now ✅ closed via durable marker (D5) ·
+  B4 (D2-vs-state / send sig) ✅ closed · B5 (DLQ-unblock / slot definition)
+  ✅ closed; spawned B-R2-1 (now fixed) · B6 ✅ closed.
+
+## Still open (for round 3, if run)
+- Bench numbers for read amplification (steady N× vs ~2N× rotation vs stalled
+  slot) to decide if R6 (single-reader/dispatch) is needed in v0.1.
+- Exact `partition_block` withhold predicate wording in `receive_partitioned`
+  (server-side `not exists` vs worker-side filter).

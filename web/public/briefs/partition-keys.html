@@ -76,8 +76,8 @@
     <h1>Partition Keys<span class="sub">Ordered, parallel consumption — the log-native way</span></h1>
     <div class="badges">
       <span class="badge">slug <b>partition-keys</b></span>
-      <span class="badge">version <b>v0.2 (draft)</b></span>
-      <span class="badge badge--amber">review <b>round 1 applied</b></span>
+      <span class="badge">version <b>v0.3 (draft)</b></span>
+      <span class="badge badge--amber">review <b>rounds 1+2 applied</b></span>
       <span class="badge">engine <b>untouched</b></span>
     </div>
   </header>
@@ -198,13 +198,13 @@
       <tr><td class="id">D1</td><td>Where the key lives</td><td class="pick"><code>ev_extra1</code>, <code>send()</code>-sourced queues only</td></tr>
       <tr><td class="id">D2</td><td>Failure policy</td><td class="pick"><code>skip</code> default; <code>pause</code> ships v0.2</td></tr>
       <tr><td class="id">D3</td><td>Slot count N</td><td class="pick">Fixed, persisted &amp; enforced per (queue, consumer)</td></tr>
-      <tr><td class="id">D4</td><td>Assignment function</td><td class="pick"><code>hashtextextended(key,0) % N</code> (version-stable)</td></tr>
-      <tr><td class="id">D5</td><td>State budget</td><td class="pick">No new table; <code>pause</code> derives from existing <code>retry_queue</code></td></tr>
+      <tr><td class="id">D4</td><td>Assignment function</td><td class="pick"><code>(hashtextextended(key,0) % N + N) % N</code> (stable, sign-safe)</td></tr>
+      <tr><td class="id">D5</td><td>State budget</td><td class="pick">Happy path &amp; <code>skip</code>: none. <code>pause</code>: a compact blocked-key marker (per failing key, not per event)</td></tr>
       <tr><td class="id">D6</td><td>Producer signature</td><td class="pick"><code>send(queue, type, payload, partition_key =&gt;)</code></td></tr>
       <tr><td class="id">D7</td><td>Slot &amp; single-owner</td><td class="pick">slot = consumer <code>"&lt;c&gt;#k/N"</code>; receive lock</td></tr>
     </tbody>
   </table>
-  <p class="note">Review round 1 re-grounded the mechanism: cooperative consumers hand out disjoint tick windows (not a hash-filtered shared batch), so slots are independent subscriptions, not a coop overlay. The retry path preserves ev_id and changes ev_txid — so order breaks across a retry, which is exactly what the pause boundary (G3) handles.</p>
+  <p class="note">Round 1 re-grounded the mechanism (slots are independent subscriptions, not a coop overlay). Round 2 verified it against the engine: G1's <code>ev_id</code> ordering is real (<code>order by 1</code>, preserved through the filter) and the G2 single-owner lock is the tested #97 double-delivery guard. It also corrected the security trust boundary (the filter hook is admin-only, so the consumer wrappers are <code>SECURITY DEFINER</code>) and moved <code>pause</code>'s blocked-set to a durable per-failing-key marker.</p>
 
   <h2><span class="n">06</span>Sprint plan</h2>
   <div class="pill-row">
@@ -232,7 +232,7 @@
       PgQue — zero-bloat PostgreSQL queue · <a href="https://pgque.dev">pgque.dev</a> ·
       <a href="https://github.com/NikolayS/pgque">github.com/NikolayS/pgque</a>
     </p>
-    <p class="note">Drafted in SamoSpec format; review round 1 (ops/security + QA/testability personas) applied. The live multi-model CLI loop was not run in this environment.</p>
+    <p class="note">Drafted in SamoSpec format; review rounds 1 + 2 (ops/security + QA/testability personas) applied. The live multi-model CLI loop was not run in this environment.</p>
   </footer>
 
 </div>
