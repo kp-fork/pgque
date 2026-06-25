@@ -50,6 +50,23 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- BENCH ONLY: a minimal pg-boss-style mutable job table, used by bench.ts to
+-- contrast against PgQue's append+rotation model. A job's life is
+-- insert(created) -> update(active) -> delete(complete): every processed job
+-- leaves dead tuples that vacuum must reclaim. This is the row churn PgQue
+-- avoids (events are append-only; rotation TRUNCATEs whole tables).
+-- Not part of any pgque feature.
+-- ---------------------------------------------------------------------------
+create table if not exists demo.jobq (
+    id         bigserial primary key,
+    key        text,
+    state      text not null default 'created',
+    payload    text,
+    created_at timestamptz not null default now()
+);
+create index if not exists jobq_state_id on demo.jobq (state, id);
+
+-- ---------------------------------------------------------------------------
 -- Keyed producer (decision D1/D6): the partition key rides in ev_extra1.
 -- This is the only "new" producer surface the design needs; here it is just a
 -- one-line wrapper over the existing 7-arg insert_event.

@@ -99,6 +99,44 @@ Knobs (env for `run.sh`, flags for `driver.ts`):
 - Invariants: each key on exactly one slot (affinity), non-decreasing `ev_id`
   per key (FIFO), nothing lost or duplicated.
 
+## Benchmark: bloat-under-backlog + throughput (`bench.ts`)
+
+The question that started this: *when workers fall behind, does the store bloat?*
+`bench.ts` runs PgQue (append + rotation) against a **pg-boss-style mutable job
+table** (`insert → update(active) → delete(complete)`) in the same database, and
+measures footprint, **dead tuples**, vacuum activity, and throughput.
+
+```bash
+cd blueprints/partition-keys/repro
+export PGHOST=/var/run/postgresql PGDATABASE=pgque_repro PGUSER=$(id -un)
+bun bench.ts --mode throughput --dur 8
+bun bench.ts --mode bloat --build-sec 16 --produce-rate 20000 --consume-rate 3000
+```
+
+**Measured (PG16, this box).** The differentiator is **churn**, not transient
+size — both engines store a backlog, but only the mutable one rots:
+
+| | PgQue (append+rotation) | jobq (mutable) |
+|---|---|---|
+| consume throughput | **~208k ev/s** | ~40k ev/s |
+| dead tuples while building a backlog | **0** | climbs (≈2× processed) |
+| vacuums needed | **0** | autovacuum must chase the churn |
+| after draining a ~150k backlog | 0 dead tuples (clean append) | **~300k dead tuples, table grew to ~34 MiB** |
+
+The punchline: a mutable queue creates ~2 dead tuples per processed job
+(`update` + `delete`), so draining a backlog leaves the table **larger and full
+of dead space** that vacuum must reclaim — exactly the pg-boss bloat. PgQue's
+events are append-only (**zero** dead tuples, zero vacuum on the event tables);
+space is reclaimed by **rotation = `TRUNCATE` of whole tables**, not row deletes.
+
+**Honest gaps (see caveats):** the produce side is round-trip-bound, not a tuned
+ingest benchmark; and the end-to-end "PgQue reclaims to ~0 via rotation" wasn't
+captured as a clean number here — PgQ rotation is a multi-period state machine
+(truncates the next ring table each `rotation_period` once consumers are past),
+which this short harness + a reap-happy sandbox didn't drive through a full
+cycle. The *mechanism* (TRUNCATE vs DELETE) and the *zero-dead-tuple* property
+are what's measured; the reclaim-curve is a follow-up.
+
 ## Caveats (it's a spike)
 
 - One-shot: produce-then-drain, not steady-state. Throughput is indicative, not
