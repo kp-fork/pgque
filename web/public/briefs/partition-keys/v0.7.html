@@ -405,7 +405,7 @@
     <div class="panel">
       <p class="card-title">Two caveats worth stating</p>
       <ul class="tight">
-        <li><strong>Pooling</strong>: session advisory locks don't survive transaction-mode pooling (Supavisor/PgBouncer) → workers need a session/direct connection</li>
+        <li><strong>Pooling</strong>: under transaction-mode pooling (Supavisor/PgBouncer) a session advisory lock <em>leaks onto the pooled backend</em> — the slot looks permanently owned (a wedge, not a miss). Only the <strong>claim-holding</strong> connection needs session/direct mode; receive/ack traffic can stay pooled</li>
         <li><strong>Grow N</strong> breaks per-key order for in-flight keys → drain the old epoch first. Sanctioned path: an epoch-gated <code>begin_resize</code> → drain → <code>complete_resize</code> state machine in core (Phase 3); immutable N in Phase 1</li>
         <li><strong>Every slot must be polled</strong> — an unclaimed slot stalls → pins rotation (R7). M ≥ N or cycle idle slots</li>
       </ul>

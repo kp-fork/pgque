@@ -178,7 +178,7 @@ optimization is future (R6).
   SECURITY DEFINER (§6); granted `pgque_reader`. **Returns the current
   `partition_consumer.epoch`** so a handler can stamp it into side effects as a
   user-space **fencing token** (a zombie worker on an old epoch is then detectable
-  downstream) — this is the consumer for the `epoch` column (F7/D9).
+  downstream) — this is the consumer for the `epoch` column (D9, §15).
 - **`pause` (Phase 2):** on nack of `K#i`, upsert `partition_block(sub_id, K,
   head_ev_id => ev_id)`. A later event of a blocked key (open marker with
   `head_ev_id < ev_id`) is **deferred** (see §11 O1 for the missing primitive),
@@ -194,7 +194,8 @@ optimization is future (R6).
   `dead_letter` (`dlq.sql:24`), so dropping a slot drops its DLQ audit —
   documented.
 - **Grants:** producer → `pgque_writer`; `subscribe_slot`/`unsubscribe_slot`/
-  `receive_partitioned` → `pgque_reader`; `partition_consumer`/`partition_block`
+  `receive_partitioned`/`slot_lock_key`/`claim_slot`/`release_slot` and `select` on
+  `partition_slot_status` → `pgque_reader`; `partition_consumer`/`partition_block`
   revoked from all app roles; `get_batch_cursor` stays admin-only. Deny-by-default
   re-applied.
 
@@ -432,7 +433,7 @@ worker connections should set `tcp_keepalives_idle/interval/count` or
 partitioned worker can still emit side effects while the successor is re-issued
 the same open batch — the same zombie class as a lease, just a narrower window and
 without the churn. Fencing token: `receive_partitioned` returns the `epoch` so
-handlers can stamp it, F7.) (2) **exclusive ownership** — the receive lock +
+handlers can stamp it, §8.) (2) **exclusive ownership** — the receive lock +
 sticky session claim across process→ack (G2, §2), not the receive lock alone. It buys neither, and adds heartbeat `UPDATE` churn
 (the per-row bloat pgque exists to avoid) plus TTL/clock tuning. Its one genuine
 benefit — *who owns what, how far behind* — is delivered writeless by
@@ -457,7 +458,7 @@ user-space lease is the fallback — not core schema.
 ### Online resize — grow N without breaking order (D9, Phase 3)
 
 > **Status: draft protocol — must pass its own review round before Phase 3 build.**
-> The v0.7 review (F2) corrected an earlier `ev_id`-gated sketch (which had an
+> The v0.7 refinement review corrected an earlier `ev_id`-gated sketch (which had an
 > abort-path data-loss hole and a watermark type conflation) to the **tick-window**
 > gating below. Phase 1 ships **immutable N**; this is the sanctioned *future*
 > path, not built code.
