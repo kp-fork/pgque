@@ -144,7 +144,7 @@
   <table>
     <thead><tr><th>Tier</th><th>Guarantee</th><th>Built on</th><th>Cost</th></tr></thead>
     <tbody>
-      <tr><td class="id">A</td><td class="pick">Mutual exclusion — one worker per key (G2)</td><td>cooperative consumers (exist) + per-key <code>pg_try_advisory_lock</code></td><td>≈ none · no new tables · no N</td></tr>
+      <tr><td class="id">A</td><td class="pick">Mutual exclusion — one worker per key (G2)</td><td>cooperative consumers (exist) + per-key <code>pg_try_advisory_xact_lock</code></td><td>≈ none · no new tables · no N</td></tr>
       <tr><td class="id">B</td><td class="pick">Ordered per key — FIFO within a key (G1 + G2)</td><td>N hash-routed slot subscriptions via <code>extra_where</code></td><td>N&#215; read amplification · fixed N · slot assignment</td></tr>
     </tbody>
   </table>
@@ -210,7 +210,7 @@
       <ul class="tight yes">
         <li><code>send(queue, type, payload, partition_key)</code> → key into <code>ev_extra1</code></li>
         <li>Existing <strong>cooperative consumers</strong> spread batches across workers</li>
-        <li>Per event: <code>pg_try_advisory_lock(hashtextextended(key,0))</code></li>
+        <li>Per event: <code>pg_try_advisory_xact_lock(hashtextextended(key,0))</code></li>
         <li>Lock free → process, then unlock · lock held → <strong>ack and drop</strong></li>
       </ul>
     </div>
@@ -351,7 +351,7 @@
     <tbody>
       <tr><td class="id">D1</td><td>A·B</td><td>Where the key lives</td><td class="pick"><code>ev_extra1</code>, <code>send()</code>-sourced queues only</td></tr>
       <tr><td class="id">D6</td><td>A·B</td><td>Producer signature</td><td class="pick"><code>send(queue, type, payload, partition_key =&gt;)</code></td></tr>
-      <tr><td class="id">A1</td><td>A</td><td>Tier A serialization</td><td class="pick">cooperative consumers + per-key <code>pg_try_advisory_lock</code>; contended + idempotent → <strong>ack-drop</strong>. No N, no assignment</td></tr>
+      <tr><td class="id">A1</td><td>A</td><td>Tier A serialization</td><td class="pick">cooperative consumers + per-key <code>pg_try_advisory_xact_lock</code>; contended + idempotent → <strong>ack-drop</strong>. No N, no assignment</td></tr>
       <tr><td class="id">A2</td><td>A</td><td>Idempotency ask</td><td class="pick">two complementary layers — consumer mutual-exclusion (dup <em>work</em>) + optional producer TTL window (dup <em>insert</em>); not a substitute for partition keys</td></tr>
       <tr><td class="id">D8–D10</td><td>B</td><td>Assignment, resize, no polling heartbeat</td><td class="pick">claim not assign; core <code>claim_slot</code>/<code>release_slot</code> lease over <code>partition_slot</code> + <code>partition_slot_status</code> view; epoch-gated online resize; <strong>no per-interval heartbeat</strong> table — the lease renews on the per-batch writes that already happen (see §09 + SPEC)</td></tr>
       <tr><td class="id">D3</td><td>B</td><td>Slot count N</td><td class="pick">Fixed, persisted &amp; enforced per (queue, consumer)</td></tr>
@@ -385,7 +385,7 @@
   <h2><span class="n">09</span>Tier B · worker → slot assignment</h2>
   <p>
     An "assignment" question exists <strong>only in Tier B</strong> (Tier A has no slots
-    — its advisory lock is per <em>key</em>, not per slot). Tier B slots are
+    — its advisory lock is per <em>key</em>, not per slot — and <em>xact</em>-scoped, so it is pooler-safe, unlike the session locks D11 rejects). Tier B slots are
     <strong>claimed, not assigned</strong>: no consumer-group leader, no
     <code>PartitionAssignor</code>, no stop-the-world rebalance. Here the
     <strong>database is the coordinator</strong> — a worker doesn't get <em>told</em>

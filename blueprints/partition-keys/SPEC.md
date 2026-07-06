@@ -371,8 +371,10 @@ spec: `blueprints/idempotency/SPEC.md`; rationale: `…/DESIGN.md`. It ships as
 **Phase 1B** (independent of partition-keys 1A).
 
 **The migration use case is not a partition-keys use case.** It is a plain-queue
-recipe = producer TTL dedup (1B) + consumer mutual exclusion (per-key advisory
-lock + idempotent handler). It needs no slots, no fixed N, and no ordering — the
+recipe = producer TTL dedup (1B) + consumer mutual exclusion (per-key
+`pg_try_advisory_xact_lock` + idempotent handler — *xact*-scoped, so pooler-safe,
+unlike the session locks D11 rejects). It needs no slots, no fixed N, and no
+ordering — the
 "partition key" there is a *lock key*, not a partition. Keeping migrations out of
 this feature is deliberate: it stops the partition-keys design from drifting
 toward a mutable job queue (pg-boss with extra steps).
