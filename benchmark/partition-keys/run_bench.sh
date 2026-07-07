@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_bench.sh -- partition-keys read-amplification benchmark (SPEC section 14
-# S4) at a Supabase-Storage-like profile: sustained keyed producer + N slot
+# S4) at a high-volume multi-tenant profile: sustained keyed producer + N slot
 # workers driving the real pgque v0.8 lease API, measured at N=16 and N=32,
 # plus a stalled-slot phase that exercises the R7 rotation-pinning failure mode.
 #

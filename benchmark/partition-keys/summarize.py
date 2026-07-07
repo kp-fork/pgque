@@ -347,7 +347,7 @@ def main() -> int:
     L: list[str] = []
     L.append("# Partition-keys read-amplification benchmark")
     L.append("")
-    L.append("Supabase-Storage profile: keyed producer + N slot workers on the real")
+    L.append("High-volume multi-tenant profile: keyed producer + N slot workers on the real")
     L.append("pgque v0.8 lease API. Maps to SPEC R2 (read amplification ~N x) and R7")
     L.append("(a stalled slot pins rotation for the whole queue).")
     L.append("")

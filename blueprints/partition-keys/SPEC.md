@@ -176,7 +176,7 @@ optimization is future (R6).
 | D8 | Worker→slot assignment | Client-side **claim loop** (§15) is still client *policy* (which slot to grab, poll cadence), but the arbitration is now **server-side rows**: `claim_slot` returns an epoch or NULL by inspecting/updating `pgque.partition_slot`; **no leader, no `PartitionAssignor`, no rebalance protocol.** Boundary follows the **mechanism/policy seam**: corruption-capable transitions → core SQL, guarded policy loops → client. | Kafka needs an assignor because partitions are exclusive *by protocol*; here the DB arbitrates per batch and per lease. |
 | D9 | Online resize (grow N) | Epoch-gated **drain-then-cutover** state machine in **core SQL** (`begin_resize`/`resize_ready`/`complete_resize`/`abort_resize`); client drives the drain loop, core re-validates on cutover. Immutable N in Phase 1 (§15 → *Online resize*). | Grow-N reshuffles `hash%N` and breaks G1/G2 for in-flight keys (Fabrizio); the log-native analog of Kinesis parent-shard drain. |
 | D10 | No per-interval heartbeat `UPDATE` churn | **Upheld for that specific cost, superseded as an argument against a lease table.** The v0.7 rejection targeted a *per-interval* heartbeat `UPDATE` — that churn is real and still rejected. **Batch-boundary lease renewal (D11) is new information:** the lease is renewed on the `receive`/`ack` writes that already happen per batch, so there is no per-interval churn to add. Observability still via the read-only `pgque.partition_slot_status` view (now reading lease columns, not `pg_locks`). | A *polling* heartbeat buys nothing; a lease renewed at batch boundaries costs no extra round-trips. |
-| D11 | Slot ownership = batch-granularity lease | **Session-scoped advisory locks rejected; lease adopted.** Session advisory locks are incompatible with transaction-mode poolers (PgBouncer/Supavisor — the Supabase ICP): the lock leaks onto the pooled backend and forces one session-mode connection per live worker, exhausting connections at high worker counts. The lease is plain short-transaction DML over `pgque.partition_slot` → works on one transaction-mode pool, no session state. Trade: crash-takeover latency = lease TTL remainder (a `session.timeout.ms`-equivalent knob returns), `clock_timestamp()`-based; worker ids must be unique per live worker. Fencing is automatic — takeover bumps `epoch`, a zombie's next `receive`/`ack` raises. | Fabrizio review: pooler incompatibility + connection floor. Worker→slot redistribution as workers come and go must be kept (static pinning alone was insufficient), so the lease must arbitrate live claims, not just pin — distinct from the out-of-scope dynamic-N rebalancing (§4). |
+| D11 | Slot ownership = batch-granularity lease | **Session-scoped advisory locks rejected; lease adopted.** Session advisory locks are incompatible with transaction-mode poolers (PgBouncer/Supavisor — the transaction-pooler ICP): the lock leaks onto the pooled backend and forces one session-mode connection per live worker, exhausting connections at high worker counts. The lease is plain short-transaction DML over `pgque.partition_slot` → works on one transaction-mode pool, no session state. Trade: crash-takeover latency = lease TTL remainder (a `session.timeout.ms`-equivalent knob returns), `clock_timestamp()`-based; worker ids must be unique per live worker. Fencing is automatic — takeover bumps `epoch`, a zombie's next `receive`/`ack` raises. | Fabrizio review: pooler incompatibility + connection floor. Worker→slot redistribution as workers come and go must be kept (static pinning alone was insufficient), so the lease must arbitrate live claims, not just pin — distinct from the out-of-scope dynamic-N rebalancing (§4). |
 
 ## 8. Implementation details
 
@@ -533,11 +533,11 @@ still emit side effects until the TTL lapses while the successor is re-issued th
 same open batch — bounded by the TTL and fenced by `epoch` (`claim_slot`
 returns it so handlers can stamp it, §8).
 
-**Works through a transaction-mode pooler (matters for the Supabase ICP).** Every
+**Works through a transaction-mode pooler (matters for the transaction-pooler ICP).** Every
 lease operation — `claim_slot`, `release_slot`, and the renewals inside
 `receive_partitioned`/`ack_partitioned` — is plain short-transaction DML over
 `partition_slot`. It holds **no session state**, so it runs correctly over **one**
-PgBouncer/Supavisor transaction-mode pool (Supabase's default): no session-mode
+PgBouncer/Supavisor transaction-mode pool: no session-mode
 connection, no second pool, no connection-per-worker floor, no per-backend lock
 leak. This is the reason the lease replaced the v0.7 session advisory claim (D11):
 that claim leaked onto the pooled backend under transaction pooling and forced one
@@ -631,7 +631,7 @@ key never drains).
   the **member/heartbeat table an explicit rejection** (D10) — redundant with
   session-death lock release + G2 — replaced by core `slot_lock_key` (D7) +
   read-only `partition_slot_status` view. Added the **connection-pooler caveat**
-  (session advisory locks need session-mode/direct connections — the Supabase
+  (session advisory locks need session-mode/direct connections — the transaction-pooler
   ICP). Upgraded R4 from hand-wave to the sanctioned **epoch-gated drain-then-
   cutover online-resize** protocol (D9, §15) with retry-flush + DLQ-preservation
   guards, modeled on Kinesis parent-shard drain. Promoted "every slot must be

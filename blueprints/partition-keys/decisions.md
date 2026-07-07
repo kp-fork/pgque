@@ -182,7 +182,7 @@ converged on the same calls; recorded here with provenance.
   reaffirms round-1's lease-table rejection against a prospect arguing the opposite.
 - **Connection-pooler caveat.** Session advisory locks don't survive transaction-
   mode pooling (Supavisor/PgBouncer) → partition workers need session-mode/direct
-  connections. Material for the Supabase ICP; documented Phase-1 constraint.
+  connections. Material for the transaction-pooler ICP; documented Phase-1 constraint.
 - **D9 — online resize.** Epoch-gated drain-then-cutover state machine in core
   (`begin/resize_ready/complete/abort`), client drives the drain loop, core
   re-validates on cutover. Handles the advisor's 3 holes: common seal tick
@@ -208,7 +208,7 @@ batch-granularity lease in core SQL. Provenance: Fabrizio review.
 
 - **D11 — slot ownership is a lease, not a session advisory lock.** Session
   advisory locks are incompatible with transaction-mode poolers (PgBouncer/
-  Supavisor — the Supabase ICP): the lock **leaks onto the pooled backend** (wedge,
+  Supavisor — the transaction-pooler ICP): the lock **leaks onto the pooled backend** (wedge,
   not miss) and forces one session-mode connection per live worker, exhausting
   connections at high worker counts. The lease is plain short-transaction DML over
   `pgque.partition_slot(queue_id, co_name, slot, lease_owner, lease_until,

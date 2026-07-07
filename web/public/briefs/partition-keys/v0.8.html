@@ -446,7 +446,7 @@
     <div class="panel">
       <p class="card-title">Three notes worth stating</p>
       <ul class="tight">
-        <li><strong>Pooling — a strength, not a caveat</strong>: every lease op (<code>claim_slot</code>, <code>release_slot</code>, the renewals inside receive/ack) is plain short-transaction DML over <code>partition_slot</code> with no session state, so the whole worker fleet runs on <strong>one</strong> transaction-mode pool (Supavisor/PgBouncer, the Supabase default) — no session-mode connection, no second pool, no connection-per-worker floor, no per-backend lock leak. The honest trade: crash-takeover latency is the lease TTL remainder (a <code>session.timeout.ms</code>-like knob), not instant session-death release</li>
+        <li><strong>Pooling — a strength, not a caveat</strong>: every lease op (<code>claim_slot</code>, <code>release_slot</code>, the renewals inside receive/ack) is plain short-transaction DML over <code>partition_slot</code> with no session state, so the whole worker fleet runs on <strong>one</strong> transaction-mode pool (Supavisor/PgBouncer) — no session-mode connection, no second pool, no connection-per-worker floor, no per-backend lock leak. The honest trade: crash-takeover latency is the lease TTL remainder (a <code>session.timeout.ms</code>-like knob), not instant session-death release</li>
         <li><strong>Grow N</strong> breaks per-key order for in-flight keys → drain the old epoch first. Sanctioned path: an epoch-gated <code>begin_resize</code> → drain → <code>complete_resize</code> state machine in core (Phase 3); immutable N in Phase 1</li>
         <li><strong>Every slot must be polled</strong> — an unclaimed slot stalls → pins rotation (R7). M ≥ N or cycle idle slots</li>
       </ul>

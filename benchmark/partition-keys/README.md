@@ -1,7 +1,7 @@
 # Partition-keys read-amplification benchmark
 
 Exercises the pgque v0.8 **partition keys** feature (`sql/pgque-api/partition_keys.sql`)
-at a Supabase-Storage-like scale — the read-amplification scenario in
+at a high-volume multi-tenant scale — the read-amplification scenario in
 `blueprints/partition-keys/SPEC.md` §14 (S4). It uses **only the real installed
 pgque API** (`send` keyed / `subscribe_slot` / `claim_slot` /
 `receive_partitioned` / `ack_partitioned` / `release_slot` and the

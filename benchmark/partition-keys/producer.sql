@@ -1,6 +1,6 @@
 -- producer.sql -- keyed pgbench producer for the partition-keys read-amp bench.
 --
--- Zipfian tenant skew (s=1.1) over 2000 tenants models the Supabase-Storage
+-- Zipfian tenant skew (s=1.1) over 2000 tenants models a high-volume multi-tenant
 -- profile: a heavy head of hot buckets plus a long tail. Each send carries a
 -- ~200-byte JSON payload and a partition key of 'tenant-<n>'. The key rides
 -- ev_extra1 (SPEC D1) so every slot's server-side hash filter routes it.

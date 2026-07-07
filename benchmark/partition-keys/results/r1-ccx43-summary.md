@@ -1,6 +1,6 @@
 # Partition-keys read-amplification benchmark
 
-Supabase-Storage profile: keyed producer + N slot workers on the real
+High-volume multi-tenant profile: keyed producer + N slot workers on the real
 pgque v0.8 lease API. Maps to SPEC R2 (read amplification ~N x) and R7
 (a stalled slot pins rotation for the whole queue).
 
