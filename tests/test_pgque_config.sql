@@ -15,8 +15,8 @@ begin
   end;
 
   -- Version function works
-  assert pgque.version() = '0.2.0',
-    'version should be 0.2.0, got ' || pgque.version();
+  assert pgque.version() = '0.3.0-devel',
+    'version should be 0.3.0-devel, got ' || pgque.version();
 
   raise notice 'PASS: pgque_config';
 end $$;
