@@ -275,6 +275,17 @@ revoke execute on function pgque.send_batch(text, text, text[]) from public;
 create or replace function pgque.subscribe(queue text, consumer text)
 returns integer as $$
 begin
+    /*
+     * Reserve '#' for partition slot consumers ("<consumer>#<slot>/<n>", see
+     * pgque.subscribe_slot). The plain receive/ack/nack guards treat any '#'
+     * name as a slot consumer and refuse it, so registering a plain consumer
+     * whose name contains '#' would permanently lock it out of those calls.
+     * Reject the reserved character here instead of at first use.
+     */
+    if position('#' in consumer) > 0 then
+        raise exception 'consumer name must not contain the reserved character #: %', consumer;
+    end if;
+
     return pgque.register_consumer(queue, consumer);
 end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;

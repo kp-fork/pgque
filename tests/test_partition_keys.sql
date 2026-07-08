@@ -573,6 +573,30 @@ begin
   raise notice 'PASS guard: plain receive() refuses a slot consumer';
 end $$;
 
+-- (a2) pgque.subscribe() must reject the reserved '#' at registration time.
+-- The plain receive/ack/nack guards treat any '#' name as a partition slot
+-- consumer, so a plain consumer registered with a '#' in its name would be
+-- permanently locked out of receive/ack/nack. Reject '#' up front instead.
+do $$
+declare
+  v_raised boolean := false;
+begin
+  begin
+    perform pgque.subscribe('pk_q', 'team#1');
+  exception
+    when others then
+      v_raised := true;
+      assert sqlerrm like '%#%',
+        'guard: subscribe reject error must name the reserved #, got: ' || sqlerrm;
+  end;
+  assert v_raised, 'guard: subscribe() must reject a consumer name containing #';
+
+  -- No half-created state: the rejected name must not leave a consumer row.
+  perform 1 from pgque.consumer where co_name = 'team#1';
+  assert not found, 'guard: rejected subscribe() must not create the consumer';
+  raise notice 'PASS guard: subscribe() refuses # in the consumer name';
+end $$;
+
 -- (b)/(c) setup: open a non-empty slot-0 batch under a live lease so the plain
 -- ack/nack guards have a real batch id to reject.
 do $$
