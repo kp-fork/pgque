@@ -5509,16 +5509,13 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
  * pgque._nack_batch_event() -- shared retry/DLQ core for a single event of an
  * open batch. Called by pgque.nack() (after the raw-slot guard) and by
  * pgque.nack_partitioned() (after the lease fence). Internal only; the caller
- * is responsible for whatever consumer-name / lease authorization applies.
+ * owns whatever consumer-name / lease authorization applies.
  *
- * Fix #98: re-query the canonical event row from the active batch using
- * msg_id, instead of trusting caller-supplied pgque.message fields. A caller
- * with an active batch could otherwise forge DLQ rows by supplying arbitrary
- * ev_id / ev_type / ev_data in the composite.
- *
- * Fix #104: DLQ insert is idempotent via ON CONFLICT in event_dead().
- * Repeated calls for the same terminal message produce exactly one
- * dead_letter row.
+ * Re-queries the canonical event row from the active batch by msg_id rather
+ * than trusting caller-supplied pgque.message fields -- otherwise a caller
+ * with an active batch could forge DLQ rows with arbitrary ev_id/type/data.
+ * The DLQ insert is idempotent (ON CONFLICT in event_dead()), so repeated
+ * calls for one terminal message produce exactly one dead_letter row.
  */
 create or replace function pgque._nack_batch_event(
     i_batch_id bigint,
@@ -5540,9 +5537,8 @@ begin
         raise exception 'batch not found: %', i_batch_id;
     end if;
 
-    -- Re-query the canonical event from the active batch (#98).
-    -- This ignores caller-supplied payload/type/extras and uses the real
-    -- values stored in the queue data tables.
+    /* Re-query the canonical event from the active batch, ignoring
+       caller-supplied payload/type/extras. */
     select ev_id, ev_time, ev_txid, ev_retry, ev_type, ev_data,
            ev_extra1, ev_extra2, ev_extra3, ev_extra4
     into v_ev
@@ -5554,10 +5550,10 @@ begin
     end if;
 
     if coalesce(v_ev.ev_retry, 0) >= v_max_retries then
-        -- Move to dead letter queue using canonical event data (#98).
-        -- event_dead() uses ON CONFLICT DO NOTHING for idempotency (#104).
-        -- ev_txid is bigint in get_batch_events (legacy PgQ signature); text
-        -- round-trip is the codebase convention to widen to xid8 without loss.
+        /* Move to DLQ with canonical event data; event_dead() is idempotent
+           via ON CONFLICT DO NOTHING. ev_txid is bigint in get_batch_events
+           (legacy PgQ signature) -- the text round-trip widens it to xid8
+           without loss, per codebase convention. */
         perform pgque.event_dead(i_batch_id, v_ev.ev_id,
             coalesce(i_reason, 'max retries exceeded'),
             v_ev.ev_time, v_ev.ev_txid::text::xid8, v_ev.ev_retry,
@@ -7252,7 +7248,7 @@ revoke execute on all functions in schema pgque from public;
  *   DML -- no session state -- so it works under transaction-mode pooling
  *   (PgBouncer/Supavisor): any pooled connection can hold or renew a lease.
  *   receive_partitioned and ack_partitioned renew the lease and fence any
- *   worker that does not hold it (US-12.4). Crash recovery is lease expiry:
+ *   worker that does not hold it. Crash recovery is lease expiry:
  *   a dead worker never releases, so after the TTL remainder another worker
  *   takes over. Takeover bumps the epoch, fencing the zombie -- its next
  *   receive/ack raises rather than double-acking (SPEC section 15).
@@ -7293,12 +7289,11 @@ create table if not exists pgque.partition_slot (
     foreign key (queue_id, co_name) references pgque.partition_consumer (queue_id, co_name) on delete cascade
 );
 
--- ---------------------------------------------------------------------------
--- Cleanup of an older draft install (advisory-lock slot model). These drops
--- must precede the new objects: the view's column set changes (create or
--- replace view cannot alter it) and the advisory claim/release functions are
--- removed entirely in favour of the lease model.
--- ---------------------------------------------------------------------------
+/*
+ * These drops must precede the new objects: the view's column set changes
+ * (create or replace view cannot alter it) and the older advisory-lock slot
+ * functions are replaced entirely by the lease model.
+ */
 drop view if exists pgque.partition_slot_status;
 drop function if exists pgque.slot_lock_key(text, text, int);
 drop function if exists pgque.claim_slot(text, text, int);
@@ -7320,17 +7315,16 @@ select i_consumer || '#' || i_slot::text || '/' || i_n::text;
 $$ language sql immutable;
 
 /*
- * Shared guard for the consume path (receive/ack/nack_partitioned).
- * Two ordered checks, then a lease renewal; returns the pinned n.
+ * Shared guard for the consume path (receive/ack/nack_partitioned). Two
+ * ordered checks, then a lease renewal; returns the pinned n.
  *
  * 1. Validate (queue, consumer, slot, n) against the pinned slot count
- *    BEFORE any lease error (US-12.7): a worker calling with the wrong N is
- *    rejected with a clear error, never silently misrouted.
- * 2. Fence the lease (G2): the caller must already hold it as i_worker.
- *    GRACE RULE: an expired lease still owned by the SAME worker (no
- *    successor took over) is renewed, not rejected -- safe because no
- *    zombie exists. Uses clock_timestamp() so lease math is correct inside
- *    a long transaction.
+ *    BEFORE any lease error: a wrong-N caller is rejected clearly, never
+ *    silently misrouted.
+ * 2. Fence the lease: the caller must already hold it as i_worker. An
+ *    expired lease still owned by the SAME worker (no successor took over)
+ *    is renewed, not rejected -- no zombie exists. clock_timestamp() keeps
+ *    lease math correct inside a long transaction.
  */
 create or replace function pgque._slot_guard(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text)
@@ -7417,7 +7411,7 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 
 -- ---------------------------------------------------------------------------
--- Producer: keyed send (US-12.1)
+-- Producer: keyed send
 -- ---------------------------------------------------------------------------
 
 -- pgque.send(queue, type, payload jsonb, partition_key) -- keyed JSON send
@@ -7431,9 +7425,11 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.send(text, text, jsonb, text) from public;
 
--- pgque.send(queue, type, payload text, partition_key) -- keyed fast path.
--- Same verbatim-bytes contract as pgque.send(text, text, text): no jsonb
--- parse/canonicalization round-trip; see sql/pgque-api/send.sql.
+/*
+ * pgque.send(queue, type, payload text, partition_key) -- keyed fast path.
+ * Same verbatim-bytes contract as pgque.send(text, text, text): no jsonb
+ * round-trip; see sql/pgque-api/send.sql.
+ */
 create or replace function pgque.send(
     i_queue text, i_type text, i_payload text, i_partition_key text)
 returns bigint as $$
@@ -7445,7 +7441,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.send(text, text, text, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot registration (US-12.7: enforced N)
+-- Slot registration (enforced N)
 -- ---------------------------------------------------------------------------
 
 create or replace function pgque.subscribe_slot(
@@ -7556,7 +7552,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.unsubscribe_slot(text, text, int) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot lease (US-12.4, US-12.5) -- SPEC D7/D8/section 15
+-- Slot lease -- SPEC D7/D8/section 15
 -- ---------------------------------------------------------------------------
 
 /*
@@ -7685,28 +7681,25 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.release_slot(text, text, int, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot consume path (US-12.2, US-12.3, US-12.4)
+-- Slot consume path
 -- ---------------------------------------------------------------------------
 
 /*
  * pgque.receive_partitioned() -- receive the slot's hash class of the stream.
- *
  * Wraps next_batch + the admin-only get_batch_cursor(4) i_extra_where hook.
- * The filter predicate is assembled with format() from the VALIDATED
- * integers n and slot only -- caller strings are never interpolated into
- * the trusted-SQL sink. NULL partition keys route to slot 0 (see header).
- *
  * Works under SECURITY DEFINER through co-ownership with get_batch_cursor
- * (see the OWNERSHIP INVARIANT in the file header) -- this is NOT the
- * receive()/nack() pattern of calling reader-granted internals.
+ * (see the OWNERSHIP INVARIANT in the file header), NOT the receive()/nack()
+ * pattern of calling reader-granted internals.
  *
- * The lease is checked and renewed FIRST (after the N validation): a worker
- * that does not hold the slot lease is fenced (G2). Contract mirrors
- * pgque.receive(): returns up to i_max messages of the slot's current batch;
- * ack_partitioned finishes the WHOLE batch even after a partial receive; a
- * batch left unacked is re-issued idempotently (the engine receive lock --
- * US-12.4). A batch whose filtered slice is empty is finished immediately so
- * the slot cursor keeps advancing.
+ * The filter predicate is built with format() from the VALIDATED integers n
+ * and slot only -- caller strings never reach the trusted-SQL sink. NULL
+ * partition keys route to slot 0 (see header).
+ *
+ * Contract mirrors pgque.receive(): the lease is fenced and renewed first
+ * (after N validation); returns up to i_max messages of the slot's current
+ * batch; ack_partitioned finishes the WHOLE batch even after a partial
+ * receive; an unacked batch is re-issued idempotently. An empty filtered
+ * slice is finished immediately so the slot cursor keeps advancing.
  */
 create or replace function pgque.receive_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text,
@@ -7747,8 +7740,8 @@ begin
         cnt := cnt + 1;
     end loop;
 
-    -- get_batch_cursor leaves the cursor open; close it so a repeated call
-    -- in the same transaction does not collide on the cursor name.
+    /* get_batch_cursor leaves the cursor open; close it so a repeated call
+       in the same transaction does not collide on the cursor name. */
     execute 'close ' || quote_ident(v_cname);
 
     -- Empty filtered batch: finish immediately to advance the slot cursor.
@@ -7761,10 +7754,12 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.receive_partitioned(text, text, int, int, text, int) from public;
 
--- pgque.ack_partitioned() -- finish the slot's active batch (same ack path
--- as pgque.ack(): finish_batch advances the slot cursor). Fences a worker
--- that does not hold the lease (G2). Returns 1 if a batch was finished, 0 if
--- the slot had no active batch.
+/*
+ * pgque.ack_partitioned() -- finish the slot's active batch (same ack path
+ * as pgque.ack(): finish_batch advances the slot cursor). Fences a worker
+ * that does not hold the lease. Returns 1 if a batch was finished, 0 if the
+ * slot had no active batch.
+ */
 create or replace function pgque.ack_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text)
 returns int as $$
@@ -7786,13 +7781,12 @@ revoke execute on function pgque.ack_partitioned(text, text, int, int, text) fro
 
 /*
  * pgque.nack_partitioned() -- lease-fenced per-message retry/DLQ for a slot.
- * The plain pgque.nack() refuses slot consumers (they carry no worker id and
- * so cannot be lease-checked); this is the partitioned equivalent. Fences a
- * worker that does not hold the lease (G2), then routes the message through
- * the shared retry/DLQ core (pgque._nack_batch_event -- #98/#104 preserved)
- * against the slot's currently open batch. Raises if the slot has no open
- * batch. Retried keyed events keep ev_extra1, so redelivery stays on the same
- * slot (SPEC section 9).
+ * The plain pgque.nack() refuses slot consumers (no worker id to lease-check);
+ * this is the partitioned equivalent. Fences a worker that does not hold the
+ * lease, then routes the message through the shared retry/DLQ core
+ * (pgque._nack_batch_event) against the slot's open batch. Raises if the slot
+ * has no open batch. Retried keyed events keep ev_extra1, so redelivery stays
+ * on the same slot (SPEC section 9).
  */
 create or replace function pgque.nack_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text,
@@ -7819,7 +7813,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.nack_partitioned(text, text, int, int, text, pgque.message, interval, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Observability (US-12.6) -- SPEC D10: writeless owner + lag view
+-- Observability -- SPEC D10: writeless owner + lag view
 -- ---------------------------------------------------------------------------
 
 /*
@@ -7878,11 +7872,13 @@ left join lateral (
 -- ---------------------------------------------------------------------------
 -- Grants (SPEC section 8)
 -- ---------------------------------------------------------------------------
--- Producer surfaces -> pgque_writer; slot/lease/observability surfaces ->
--- pgque_reader (consumer-side). Internal tables stay off app roles entirely
--- (written only inside SECURITY DEFINER functions); pgque_admin keeps
--- read-only visibility for ops. get_batch_cursor stays admin-only -- the
--- wrapper works through co-ownership, not a grant.
+/*
+ * Producer surfaces -> pgque_writer; slot/lease/observability surfaces ->
+ * pgque_reader (consumer-side). Internal tables stay off app roles (written
+ * only inside SECURITY DEFINER functions); pgque_admin keeps read-only
+ * visibility for ops. get_batch_cursor stays admin-only -- the wrapper works
+ * through co-ownership, not a grant.
+ */
 
 revoke all on pgque.partition_consumer from public, pgque_reader, pgque_writer;
 grant select on pgque.partition_consumer to pgque_admin;
@@ -7909,54 +7905,34 @@ revoke execute on function pgque._slot_name(text, int, int) from public, pgque_r
 revoke execute on function pgque._slot_guard(text, text, int, int, text) from public, pgque_reader, pgque_writer;
 revoke execute on function pgque._slot_batch(text, text, int, int) from public, pgque_reader, pgque_writer;
 
--- Re-apply deny-by-default: functions created in this file would otherwise
--- keep PostgreSQL's default PUBLIC EXECUTE (see sql/pgque-api/send.sql).
+/* Re-apply deny-by-default: functions created in this file would otherwise
+   keep PostgreSQL's default PUBLIC EXECUTE (see sql/pgque-api/send.sql). */
 revoke execute on all functions in schema pgque from public;
 
 -- pgque-api/send_idem.sql
 -- pgque-api/send_idem.sql -- Producer idempotency (TTL dedup window)
 -- Copyright 2026 Nikolay Samokhvalov. Apache-2.0 license.
 -- Includes code derived from PgQ (ISC license, Marko Kreen / Skype Technologies OU).
---
--- Implements Phase 1B producer-side dedup (blueprints/idempotency/SPEC.md):
---   pgque.idem                                 -- internal claim table
---   pgque.send_idem(queue, type, payload, idem_key, ttl, partition_key)
---                                              -- text + jsonb overloads
---   pgque.maint_idem()                         -- GC, whole table
---   pgque.maint_idem(queue_name)               -- GC, one queue (maint hook)
---
--- A send carrying an idempotency key already used for the same queue within
--- the TTL window appends nothing and returns the ORIGINAL event id with
--- deduped = true. Concurrent producers racing on one key resolve to exactly
--- one insert: the primary key on (queue_id, idem_key) plus a single atomic
--- upsert serialize them -- no advisory lock, no subtransaction (Key Design
--- Rule 4). The claim and the event append share one transaction, so a
--- failed append rolls the claim back too: a crash can never leave a claimed
--- key with no event (which would silently suppress a never-delivered job).
---
--- KEY-SCOPE HAZARD (US-13.2 -- read before choosing keys):
--- Dedup is an EXACT match on (queue, idem_key). The key MUST encode the
--- desired EFFECT, not just the entity. Key on the entity alone
--- ('migrate:tenant1'), ship migration v1, then ship v2 inside the TTL
--- window -- the v2 send collides with v1's live key and is SILENTLY
--- suppressed: the tenant never gets v2 until the window expires. Correct
--- key includes every dimension that changes the intended work, e.g.
--- 'migrate:<tenant>:<target_schema_version>'. The TTL is for collapsing a
--- burst of the SAME effect, not for rate-limiting distinct effects.
---
--- Composition with partition keys (US-12): i_partition_key rides ev_extra1
--- (same slot routing as pgque.send(queue, type, payload, partition_key));
--- the idem key rides ev_extra2 for observability. Neither feature requires
--- the other.
---
--- Consumer mutual exclusion (US-13.5) is the complementary layer: dedup
--- keeps the log small, a per-key pg_try_advisory_xact_lock + an idempotent
--- handler keep the work correct if a duplicate slips in past the window.
 
--- Internal claim table: one row per live (queue, idem_key) window.
--- App roles never touch it -- all access goes through the SECURITY DEFINER
--- functions below. Expected live size ~= produce_rate * ttl (tiny for the
--- migration-storm case: tens of thousands of rows for a 1 hour window).
+/*
+ * Producer-side dedup (blueprints/idempotency/SPEC.md, Phase 1B): a send
+ * whose idem_key was already used for the same queue within the TTL window
+ * appends nothing and returns the original event id with deduped = true.
+ * Composes with partition keys via send_idem(..., partition_key); neither
+ * feature requires the other.
+ *
+ * Key scope: dedup is an EXACT match on (queue, idem_key). The key must
+ * encode the intended EFFECT, not just the entity -- keying on the entity
+ * alone silently suppresses a later, different send that reuses the key
+ * inside the window. The TTL collapses a burst of the SAME effect; it is
+ * not a rate limiter for distinct effects.
+ */
+
+/*
+ * Internal claim table: one row per live (queue, idem_key) window. App roles
+ * never touch it -- access goes through the SECURITY DEFINER functions below.
+ * Live size ~= produce_rate * ttl.
+ */
 create table if not exists pgque.idem (
     queue_id   int4        not null references pgque.queue (queue_id)
                            on delete cascade,
@@ -7969,27 +7945,23 @@ create table if not exists pgque.idem (
 -- GC scans by expiry; serves both the whole-table and per-queue sweeps.
 create index if not exists idem_expires_at_idx on pgque.idem (expires_at);
 
-/* Lock the claim table down: pgque_reader holds a blanket select on
-   pre-existing pgque tables (roles.sql), so revoke explicitly no matter
-   where this file lands in the install order. Revokes are idempotent. */
+/* pgque_reader holds a blanket select on pre-existing tables (roles.sql), so
+   revoke explicitly regardless of install order. Revokes are idempotent. */
 revoke all on table pgque.idem from public;
 revoke all on table pgque.idem from pgque_reader, pgque_writer, pgque_admin;
 
--- pgque.send_idem(queue, type, payload text, idem_key, ttl, partition_key)
--- Fast path, opaque textual payload (same conventions as pgque.send(text)).
---
--- Returns exactly one row:
---   deduped = false, event_id = <new id>      -- first use in the window
---   deduped = true,  event_id = <original id> -- duplicate; nothing appended
---
--- The claim is one atomic upsert: a fresh key inserts, an EXPIRED key is
--- reclaimed via the conditional do-update, a LIVE key updates nothing and
--- returns no row (dedup). Fresh insert vs reclaim need no distinction in
--- the result -- both mean "this send owns the window" -- so no xmax trick
--- is needed. On the dedup path the original event id is read back in a
--- follow-up statement: a loser blocked on the winner's in-flight claim
--- resumes only after the winner's whole transaction commits, so the row it
--- then reads already carries the winner's event_id.
+/*
+ * pgque.send_idem(queue, type, payload text, idem_key, ttl, partition_key)
+ * Fast path, opaque textual payload (same conventions as pgque.send(text)).
+ * Returns one row: deduped = false with a new event id on first use in the
+ * window, deduped = true with the original id on a duplicate.
+ *
+ * Concurrent producers racing one key resolve to a single insert: the
+ * (queue_id, idem_key) primary key plus one atomic upsert serialize them --
+ * no advisory lock, no subtransaction. Claim and append share one
+ * transaction, so a failed append rolls the claim back and the key stays
+ * usable (a crash can never leave a claimed key with no event).
+ */
 create or replace function pgque.send_idem(
     i_queue text, i_type text, i_payload text, i_idem_key text,
     i_ttl interval default '1 hour', i_partition_key text default null)
@@ -8015,11 +7987,11 @@ begin
         raise exception 'queue not found: %', i_queue;
     end if;
 
-    /* Self-wire GC (US-13.4): register pgque.maint_idem in this queue's
-       queue_extra_maint so the stock pgque.maint() runner reaps expired
-       claims -- no edit to maint.sql. Steady state costs nothing: the
-       check runs on the row already fetched above, and the one-time update
-       re-checks under the row lock so concurrent first-sends stay safe. */
+    /*
+     * Register pgque.maint_idem in this queue's queue_extra_maint so the
+     * stock maint() runner reaps expired claims. The one-time update
+     * re-checks under the row lock, so concurrent first-sends stay safe.
+     */
     if not (coalesce(v_extra_maint, '{}'::text[]) @> array['pgque.maint_idem']) then
         update pgque.queue q
         set queue_extra_maint =
@@ -8030,8 +8002,10 @@ begin
                    @> array['pgque.maint_idem']);
     end if;
 
-    /* Atomic claim (I2): the unique key serializes concurrent producers;
-       the conditional do-update lets only an EXPIRED key be reclaimed. */
+    /*
+     * Atomic claim: the unique key serializes concurrent producers; the
+     * conditional do-update lets only an EXPIRED key be reclaimed.
+     */
     insert into pgque.idem as k (queue_id, idem_key, event_id, expires_at)
     values (v_queue_id, i_idem_key, null, now() + i_ttl)
     on conflict (queue_id, idem_key) do update
@@ -8041,16 +8015,15 @@ begin
     returning true into v_claimed;
 
     if v_claimed then
-        /* Append (I3): same transaction as the claim -- if this insert
-           fails, the claim rolls back with it and the key stays usable. */
+        /* Append in the same transaction as the claim: if this fails, the
+           claim rolls back with it and the key stays usable. */
         v_event_id := pgque.insert_event(
             i_queue, i_type, i_payload, i_partition_key, i_idem_key,
             null, null);
 
-        /* Store the id for later dedup responses. This row was written by
-           this transaction two statements ago -- the lock is already held,
-           so this is contention-free (and invisible to others until the
-           claim+append pair commits as one). */
+        -- Record the id for later dedup responses (contention-free: this
+        -- transaction already holds the row lock, invisible to others until
+        -- the claim+append pair commits).
         update pgque.idem k
         set event_id = v_event_id
         where k.queue_id = v_queue_id
@@ -8059,10 +8032,9 @@ begin
         event_id := v_event_id;
         deduped := false;
     else
-        /* Dedup: nothing appended; report the original event id. The row
-           can only be missing in the pathological corner where the claim
-           expired and was GC'd between these two statements (sub-second
-           TTLs); event_id is then null but deduped stays true. */
+        /* Dedup: report the original event id. It is null only in the corner
+           where the claim expired and was GC'd between these two statements
+           (sub-second TTLs); deduped still stays true. */
         select k.event_id into v_event_id
         from pgque.idem k
         where k.queue_id = v_queue_id
@@ -8077,9 +8049,11 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function
     pgque.send_idem(text, text, text, text, interval, text) from public;
 
--- pgque.send_idem(queue, type, payload jsonb, idem_key, ttl, partition_key)
--- JSON payload variant, opt-in via explicit ::jsonb cast (untyped literals
--- resolve to the text overload -- see the note in send.sql).
+/*
+ * pgque.send_idem(queue, type, payload jsonb, idem_key, ttl, partition_key)
+ * JSON payload variant; opt in with an explicit ::jsonb cast (untyped
+ * literals resolve to the text overload -- see send.sql).
+ */
 create or replace function pgque.send_idem(
     i_queue text, i_type text, i_payload jsonb, i_idem_key text,
     i_ttl interval default '1 hour', i_partition_key text default null)
@@ -8095,12 +8069,13 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function
     pgque.send_idem(text, text, jsonb, text, interval, text) from public;
 
--- pgque.maint_idem(queue_name) -- reap expired claims for one queue.
--- Shaped for the pgque.maint_operations() extra-maint hook: takes the queue
--- name, deletes a bounded batch, returns 1 to request another immediate
--- pass when the batch came back full, else 0. send_idem() registers it in
--- queue_extra_maint automatically; the ownership check in pgque.maint()
--- passes because this function and maint() share the install owner.
+/*
+ * pgque.maint_idem(queue_name) -- reap expired claims for one queue, shaped
+ * for the pgque.maint_operations() extra-maint hook. Deletes a bounded batch;
+ * returns 1 to request another immediate pass when the batch came back full,
+ * else 0. send_idem() registers it in queue_extra_maint automatically; it
+ * shares the install owner with maint(), so maint()'s ownership check passes.
+ */
 create or replace function pgque.maint_idem(i_queue_name text)
 returns integer as $$
 declare
@@ -8128,11 +8103,11 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.maint_idem(text) from public;
 
--- pgque.maint_idem() -- reap expired claims across all queues.
--- Standalone entry point for operators scheduling GC directly (pg_cron or
--- any external scheduler) instead of relying on the per-queue hook above.
--- Same bounded-batch contract: returns 1 when a full batch was deleted
--- (call again), 0 when the backlog is drained.
+/*
+ * pgque.maint_idem() -- reap expired claims across all queues, for operators
+ * scheduling GC directly (pg_cron or external). Same bounded-batch contract:
+ * returns 1 when a full batch was deleted (call again), 0 when drained.
+ */
 create or replace function pgque.maint_idem()
 returns integer as $$
 declare
@@ -8151,8 +8126,7 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.maint_idem() from public;
 
--- Grants: send_idem is a producer surface -> pgque_writer (same rationale
--- as send()); maint_idem mirrors maint() -> pgque_admin.
+-- Grants: send_idem -> pgque_writer (producer); maint_idem -> pgque_admin.
 grant execute on function
     pgque.send_idem(text, text, text, text, interval, text)  to pgque_writer;
 grant execute on function

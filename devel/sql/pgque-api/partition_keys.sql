@@ -44,7 +44,7 @@
  *   DML -- no session state -- so it works under transaction-mode pooling
  *   (PgBouncer/Supavisor): any pooled connection can hold or renew a lease.
  *   receive_partitioned and ack_partitioned renew the lease and fence any
- *   worker that does not hold it (US-12.4). Crash recovery is lease expiry:
+ *   worker that does not hold it. Crash recovery is lease expiry:
  *   a dead worker never releases, so after the TTL remainder another worker
  *   takes over. Takeover bumps the epoch, fencing the zombie -- its next
  *   receive/ack raises rather than double-acking (SPEC section 15).
@@ -85,12 +85,11 @@ create table if not exists pgque.partition_slot (
     foreign key (queue_id, co_name) references pgque.partition_consumer (queue_id, co_name) on delete cascade
 );
 
--- ---------------------------------------------------------------------------
--- Cleanup of an older draft install (advisory-lock slot model). These drops
--- must precede the new objects: the view's column set changes (create or
--- replace view cannot alter it) and the advisory claim/release functions are
--- removed entirely in favour of the lease model.
--- ---------------------------------------------------------------------------
+/*
+ * These drops must precede the new objects: the view's column set changes
+ * (create or replace view cannot alter it) and the older advisory-lock slot
+ * functions are replaced entirely by the lease model.
+ */
 drop view if exists pgque.partition_slot_status;
 drop function if exists pgque.slot_lock_key(text, text, int);
 drop function if exists pgque.claim_slot(text, text, int);
@@ -112,17 +111,16 @@ select i_consumer || '#' || i_slot::text || '/' || i_n::text;
 $$ language sql immutable;
 
 /*
- * Shared guard for the consume path (receive/ack/nack_partitioned).
- * Two ordered checks, then a lease renewal; returns the pinned n.
+ * Shared guard for the consume path (receive/ack/nack_partitioned). Two
+ * ordered checks, then a lease renewal; returns the pinned n.
  *
  * 1. Validate (queue, consumer, slot, n) against the pinned slot count
- *    BEFORE any lease error (US-12.7): a worker calling with the wrong N is
- *    rejected with a clear error, never silently misrouted.
- * 2. Fence the lease (G2): the caller must already hold it as i_worker.
- *    GRACE RULE: an expired lease still owned by the SAME worker (no
- *    successor took over) is renewed, not rejected -- safe because no
- *    zombie exists. Uses clock_timestamp() so lease math is correct inside
- *    a long transaction.
+ *    BEFORE any lease error: a wrong-N caller is rejected clearly, never
+ *    silently misrouted.
+ * 2. Fence the lease: the caller must already hold it as i_worker. An
+ *    expired lease still owned by the SAME worker (no successor took over)
+ *    is renewed, not rejected -- no zombie exists. clock_timestamp() keeps
+ *    lease math correct inside a long transaction.
  */
 create or replace function pgque._slot_guard(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text)
@@ -209,7 +207,7 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 
 -- ---------------------------------------------------------------------------
--- Producer: keyed send (US-12.1)
+-- Producer: keyed send
 -- ---------------------------------------------------------------------------
 
 -- pgque.send(queue, type, payload jsonb, partition_key) -- keyed JSON send
@@ -223,9 +221,11 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.send(text, text, jsonb, text) from public;
 
--- pgque.send(queue, type, payload text, partition_key) -- keyed fast path.
--- Same verbatim-bytes contract as pgque.send(text, text, text): no jsonb
--- parse/canonicalization round-trip; see sql/pgque-api/send.sql.
+/*
+ * pgque.send(queue, type, payload text, partition_key) -- keyed fast path.
+ * Same verbatim-bytes contract as pgque.send(text, text, text): no jsonb
+ * round-trip; see sql/pgque-api/send.sql.
+ */
 create or replace function pgque.send(
     i_queue text, i_type text, i_payload text, i_partition_key text)
 returns bigint as $$
@@ -237,7 +237,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.send(text, text, text, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot registration (US-12.7: enforced N)
+-- Slot registration (enforced N)
 -- ---------------------------------------------------------------------------
 
 create or replace function pgque.subscribe_slot(
@@ -348,7 +348,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.unsubscribe_slot(text, text, int) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot lease (US-12.4, US-12.5) -- SPEC D7/D8/section 15
+-- Slot lease -- SPEC D7/D8/section 15
 -- ---------------------------------------------------------------------------
 
 /*
@@ -477,28 +477,25 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.release_slot(text, text, int, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Slot consume path (US-12.2, US-12.3, US-12.4)
+-- Slot consume path
 -- ---------------------------------------------------------------------------
 
 /*
  * pgque.receive_partitioned() -- receive the slot's hash class of the stream.
- *
  * Wraps next_batch + the admin-only get_batch_cursor(4) i_extra_where hook.
- * The filter predicate is assembled with format() from the VALIDATED
- * integers n and slot only -- caller strings are never interpolated into
- * the trusted-SQL sink. NULL partition keys route to slot 0 (see header).
- *
  * Works under SECURITY DEFINER through co-ownership with get_batch_cursor
- * (see the OWNERSHIP INVARIANT in the file header) -- this is NOT the
- * receive()/nack() pattern of calling reader-granted internals.
+ * (see the OWNERSHIP INVARIANT in the file header), NOT the receive()/nack()
+ * pattern of calling reader-granted internals.
  *
- * The lease is checked and renewed FIRST (after the N validation): a worker
- * that does not hold the slot lease is fenced (G2). Contract mirrors
- * pgque.receive(): returns up to i_max messages of the slot's current batch;
- * ack_partitioned finishes the WHOLE batch even after a partial receive; a
- * batch left unacked is re-issued idempotently (the engine receive lock --
- * US-12.4). A batch whose filtered slice is empty is finished immediately so
- * the slot cursor keeps advancing.
+ * The filter predicate is built with format() from the VALIDATED integers n
+ * and slot only -- caller strings never reach the trusted-SQL sink. NULL
+ * partition keys route to slot 0 (see header).
+ *
+ * Contract mirrors pgque.receive(): the lease is fenced and renewed first
+ * (after N validation); returns up to i_max messages of the slot's current
+ * batch; ack_partitioned finishes the WHOLE batch even after a partial
+ * receive; an unacked batch is re-issued idempotently. An empty filtered
+ * slice is finished immediately so the slot cursor keeps advancing.
  */
 create or replace function pgque.receive_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text,
@@ -539,8 +536,8 @@ begin
         cnt := cnt + 1;
     end loop;
 
-    -- get_batch_cursor leaves the cursor open; close it so a repeated call
-    -- in the same transaction does not collide on the cursor name.
+    /* get_batch_cursor leaves the cursor open; close it so a repeated call
+       in the same transaction does not collide on the cursor name. */
     execute 'close ' || quote_ident(v_cname);
 
     -- Empty filtered batch: finish immediately to advance the slot cursor.
@@ -553,10 +550,12 @@ end;
 $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.receive_partitioned(text, text, int, int, text, int) from public;
 
--- pgque.ack_partitioned() -- finish the slot's active batch (same ack path
--- as pgque.ack(): finish_batch advances the slot cursor). Fences a worker
--- that does not hold the lease (G2). Returns 1 if a batch was finished, 0 if
--- the slot had no active batch.
+/*
+ * pgque.ack_partitioned() -- finish the slot's active batch (same ack path
+ * as pgque.ack(): finish_batch advances the slot cursor). Fences a worker
+ * that does not hold the lease. Returns 1 if a batch was finished, 0 if the
+ * slot had no active batch.
+ */
 create or replace function pgque.ack_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text)
 returns int as $$
@@ -578,13 +577,12 @@ revoke execute on function pgque.ack_partitioned(text, text, int, int, text) fro
 
 /*
  * pgque.nack_partitioned() -- lease-fenced per-message retry/DLQ for a slot.
- * The plain pgque.nack() refuses slot consumers (they carry no worker id and
- * so cannot be lease-checked); this is the partitioned equivalent. Fences a
- * worker that does not hold the lease (G2), then routes the message through
- * the shared retry/DLQ core (pgque._nack_batch_event -- #98/#104 preserved)
- * against the slot's currently open batch. Raises if the slot has no open
- * batch. Retried keyed events keep ev_extra1, so redelivery stays on the same
- * slot (SPEC section 9).
+ * The plain pgque.nack() refuses slot consumers (no worker id to lease-check);
+ * this is the partitioned equivalent. Fences a worker that does not hold the
+ * lease, then routes the message through the shared retry/DLQ core
+ * (pgque._nack_batch_event) against the slot's open batch. Raises if the slot
+ * has no open batch. Retried keyed events keep ev_extra1, so redelivery stays
+ * on the same slot (SPEC section 9).
  */
 create or replace function pgque.nack_partitioned(
     i_queue text, i_consumer text, i_slot int, i_n int, i_worker text,
@@ -611,7 +609,7 @@ $$ language plpgsql security definer set search_path = pgque, pg_catalog;
 revoke execute on function pgque.nack_partitioned(text, text, int, int, text, pgque.message, interval, text) from public;
 
 -- ---------------------------------------------------------------------------
--- Observability (US-12.6) -- SPEC D10: writeless owner + lag view
+-- Observability -- SPEC D10: writeless owner + lag view
 -- ---------------------------------------------------------------------------
 
 /*
@@ -670,11 +668,13 @@ left join lateral (
 -- ---------------------------------------------------------------------------
 -- Grants (SPEC section 8)
 -- ---------------------------------------------------------------------------
--- Producer surfaces -> pgque_writer; slot/lease/observability surfaces ->
--- pgque_reader (consumer-side). Internal tables stay off app roles entirely
--- (written only inside SECURITY DEFINER functions); pgque_admin keeps
--- read-only visibility for ops. get_batch_cursor stays admin-only -- the
--- wrapper works through co-ownership, not a grant.
+/*
+ * Producer surfaces -> pgque_writer; slot/lease/observability surfaces ->
+ * pgque_reader (consumer-side). Internal tables stay off app roles (written
+ * only inside SECURITY DEFINER functions); pgque_admin keeps read-only
+ * visibility for ops. get_batch_cursor stays admin-only -- the wrapper works
+ * through co-ownership, not a grant.
+ */
 
 revoke all on pgque.partition_consumer from public, pgque_reader, pgque_writer;
 grant select on pgque.partition_consumer to pgque_admin;
@@ -701,6 +701,6 @@ revoke execute on function pgque._slot_name(text, int, int) from public, pgque_r
 revoke execute on function pgque._slot_guard(text, text, int, int, text) from public, pgque_reader, pgque_writer;
 revoke execute on function pgque._slot_batch(text, text, int, int) from public, pgque_reader, pgque_writer;
 
--- Re-apply deny-by-default: functions created in this file would otherwise
--- keep PostgreSQL's default PUBLIC EXECUTE (see sql/pgque-api/send.sql).
+/* Re-apply deny-by-default: functions created in this file would otherwise
+   keep PostgreSQL's default PUBLIC EXECUTE (see sql/pgque-api/send.sql). */
 revoke execute on all functions in schema pgque from public;
