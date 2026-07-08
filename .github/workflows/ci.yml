@@ -39,7 +39,7 @@ jobs:
       - name: Install pgque
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Run regression tests
         run: |
@@ -55,7 +55,7 @@ jobs:
         run: |
           # Re-run install -- should produce no errors
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
           # Verify everything still works
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
             -v ON_ERROR_STOP=1 -f tests/test_install_idempotency.sql
@@ -63,7 +63,7 @@ jobs:
       - name: Test uninstall
         run: |
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque_uninstall.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque_uninstall.sql
           # Verify schema is gone
           result=$(PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
             -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_namespace where nspname = 'pgque'")
@@ -76,6 +76,78 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker rm -f pgque-test
+
+  stable-smoke:
+    name: stable install smoke (frozen sql/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Start PostgreSQL 18
+        run: |
+          set -Eeuo pipefail
+          docker run -d --name pgque-stable-smoke \
+            -e POSTGRES_PASSWORD=pgque_test \
+            -e POSTGRES_DB=pgque_test \
+            -p 5432:5432 \
+            postgres:18
+
+          for _ in $(seq 1 30); do
+            docker exec pgque-stable-smoke pg_isready -U postgres && break
+            sleep 1
+          done || { echo "PG not ready after 30 seconds"; exit 1; }
+
+      - name: Install frozen stable pgque
+        run: |
+          set -Eeuo pipefail
+          # sql/ is the last released version and is committed by hand, not
+          # generated. Install it as-is (no build step) so this path can never
+          # rot while devel/sql/ moves ahead.
+          PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
+            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+
+      - name: Smoke test send/receive round-trip
+        run: |
+          set -Eeuo pipefail
+          PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
+            -v ON_ERROR_STOP=1 <<'SQL'
+          -- Each statement is its own transaction (autocommit): PgQ needs the
+          -- send committed before ticker() captures it into a batch.
+          select pgque.create_queue('smoke_q');
+          select pgque.register_consumer('smoke_q', 'smoke_c');
+          select pgque.send('smoke_q', '{"hello":"world"}'::jsonb);
+          select pgque.ticker();
+          do $$
+          declare
+            v_msg pgque.message;
+            v_count int := 0;
+          begin
+            for v_msg in select * from pgque.receive('smoke_q', 'smoke_c', 10) loop
+              v_count := v_count + 1;
+            end loop;
+            assert v_count = 1, 'stable smoke: expected 1 message, got ' || v_count;
+            perform pgque.ack(v_msg.batch_id);
+          end $$;
+          SQL
+
+      - name: Smoke test uninstall
+        run: |
+          set -Eeuo pipefail
+          PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
+            -v ON_ERROR_STOP=1 -f sql/pgque_uninstall.sql
+          result=$(PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
+            -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_namespace where nspname = 'pgque'")
+          if [ "$result" != "0" ]; then
+            echo "FAIL: pgque schema still exists after uninstall"
+            exit 1
+          fi
+          echo "PASS: stable install smoke complete"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f pgque-stable-smoke
 
   upgrade-v0-1-to-head:
     name: upgrade v0.1.0 to HEAD (PG ${{ matrix.pg_version }})
@@ -136,7 +208,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            --single-transaction -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            --single-transaction -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Verify upgraded state
         run: |
@@ -154,7 +226,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
             -v ON_ERROR_STOP=1 -f tests/test_install_idempotency.sql
 
@@ -225,7 +297,7 @@ jobs:
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_tle_regress \
             -v ON_ERROR_STOP=1 \
             -c 'create extension pg_tle;' \
-            -f sql/pgque-tle.sql \
+            -f devel/sql/pgque-tle.sql \
             -c 'create extension pgque;'
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_tle_regress \
             -v ON_ERROR_STOP=1 -f tests/run_all.sql
@@ -292,7 +364,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Run full regression suite (pg_cron-skipped tests now run)
         run: |
@@ -394,7 +466,7 @@ jobs:
       - name: Install pgque and schedule pg_timetable jobs
         run: |
           set -Eeuo pipefail
-          docker cp sql/pgque.sql "${PG_CONTAINER}":/tmp/pgque.sql
+          docker cp devel/sql/pgque.sql "${PG_CONTAINER}":/tmp/pgque.sql
           docker cp tests/test_pgtimetable_real_setup.sql "${PG_CONTAINER}":/tmp/test_pgtimetable_real_setup.sql
           docker exec -e PGPASSWORD "${PG_CONTAINER}" \
             psql -U postgres -d pgque_test -v ON_ERROR_STOP=1 -f /tmp/pgque.sql
@@ -454,7 +526,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Python client test suite
         run: |
@@ -510,7 +582,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Go client test suite
         run: |
@@ -553,7 +625,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -610,7 +682,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           PGPASSWORD=pgque_test psql -h localhost -U postgres -d pgque_test \
-            -v ON_ERROR_STOP=1 -f sql/pgque.sql
+            -v ON_ERROR_STOP=1 -f devel/sql/pgque.sql
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -675,15 +747,15 @@ jobs:
 
       - name: Verify generated SQL files are committed (drift check)
         run: |
-          # build/transform.sh has already run in the previous step.
-          # The committed sql/pgque.sql and sql/pgque-tle.sql must equal
-          # what it just produced; otherwise users cloning the repo and
-          # running \i sql/pgque.sql (or \i sql/pgque-tle.sql) get a stale
-          # file. CI's other jobs rebuild the install file from sources
-          # before running tests, so they would not catch the drift.
-          if ! git diff --exit-code -- sql/pgque.sql sql/pgque-tle.sql; then
-            echo "FAIL: sql/pgque.sql or sql/pgque-tle.sql is out of sync with build/transform.sh output."
-            echo "Run: bash build/transform.sh && git add sql/pgque.sql sql/pgque-tle.sql && git commit"
+          # build/transform.sh has already run in the previous step and emits
+          # the in-development install into devel/sql/. The committed
+          # devel/sql/pgque.sql and devel/sql/pgque-tle.sql must equal what it
+          # just produced; otherwise contributors running the devel install get
+          # a stale file. CI's other jobs rebuild from sources before running
+          # tests, so they would not catch the drift.
+          if ! git diff --exit-code -- devel/sql/pgque.sql devel/sql/pgque-tle.sql; then
+            echo "FAIL: devel/sql/pgque.sql or devel/sql/pgque-tle.sql is out of sync with build/transform.sh output."
+            echo "Run: bash build/transform.sh && git add devel/sql/pgque.sql devel/sql/pgque-tle.sql && git commit"
             exit 1
           fi
-          echo "PASS: sql/pgque.sql and sql/pgque-tle.sql are in sync with build/transform.sh"
+          echo "PASS: devel/sql/pgque.sql and devel/sql/pgque-tle.sql are in sync with build/transform.sh"
