@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 -- Test pgque.send_idem() -- producer idempotency (Phase 1B, US-13.x)
--- Requires sql/pgque.sql + sql/pgque-api/send_idem.sql.
+-- Requires devel/sql/pgque.sql + devel/sql/pgque-api/send_idem.sql.
 -- dblink is used for the cross-session race test (extensions are allowed
 -- in tests/; the managed-PG-compat rule applies only to the default install).
 

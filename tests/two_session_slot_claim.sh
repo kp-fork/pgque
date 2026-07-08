@@ -9,8 +9,8 @@ set -Eeuo pipefail
 #   PGQUE_TEST_DSN=postgresql://postgres:***@localhost/pgque_test \
 #     tests/two_session_slot_claim.sh
 #
-# The target database must already have sql/pgque.sql and
-# sql/pgque-api/partition_keys.sql installed.
+# The target database must already have devel/sql/pgque.sql and
+# devel/sql/pgque-api/partition_keys.sql installed.
 #
 # Slot ownership is a batch-granularity LEASE (worker id + TTL + epoch) held
 # in pgque.partition_slot as plain transactional DML -- no session state, no
