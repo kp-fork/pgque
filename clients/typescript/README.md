@@ -1,7 +1,7 @@
 # pgque
 
 TypeScript client for [PgQue](https://github.com/NikolayS/pgque) — the
-PgQ-based universal PostgreSQL queue. Thin, idiomatic wrapper over the
+PgQ-based universal Postgres queue. A thin, idiomatic wrapper over the
 `pgque-api` SQL functions: `send`, `send_batch`, `subscribe`,
 `unsubscribe`, `receive`, `ack`, `nack`, `ticker`, `ticker_all`, and
 `force_next_tick`.
@@ -89,7 +89,7 @@ try {
 
 `Message.msgId`, `Message.batchId`, and the return values of `send()`,
 `sendBatch()`, `ticker(queue)`, and `forceNextTick(queue)` are JS `bigint` to
-match PostgreSQL `bigint` losslessly.
+match Postgres `bigint` losslessly.
 
 ## Experimental: cooperative consumers
 
@@ -122,7 +122,7 @@ identically to the non-cooperative form.
 | `client.subscribeSubconsumer(queue, consumer, subconsumer)` | Register a subconsumer. Returns `1` first call, `0` if already registered. |
 | `client.unsubscribeSubconsumer(queue, consumer, subconsumer, { batchHandling? })` | Remove a subconsumer. Default raises if a batch is active; `batchHandling: 1` routes the active batch through retry/DLQ first. |
 | `client.receiveCoop(queue, consumer, subconsumer, { maxMessages?, deadInterval? })` | Cooperative receive. Auto-registers main + subconsumer rows on first call. `deadInterval` enables stale-batch takeover; the new owner gets a fresh `batchId`. |
-| `client.touchSubconsumer(queue, consumer, subconsumer)` | Refresh the subconsumer heartbeat so a long handler is not stolen. The high-level consumer does not call this automatically. |
+| `client.touchSubconsumer(queue, consumer, subconsumer)` | Refresh the subconsumer heartbeat so a long-running handler's batch is not taken over. The high-level consumer does not call this automatically. |
 
 Throughput note: cooperative allocation serializes on a `FOR UPDATE` of the
 main subscription row. Many workers polling tiny batches contend on that
@@ -147,7 +147,7 @@ PGQUE_TEST_DSN=postgres://user@host/db \
 All errors derive from `PgqueError`:
 
 - `PgqueConnectionError` — connect failure
-- `PgqueQueueNotFoundError` — caller forgot `pgque.create_queue`
+- `PgqueQueueNotFoundError` — the queue does not exist (run `pgque.create_queue` first)
 - `PgqueConsumerNotFoundError` — consumer not subscribed
 - `PgqueBatchNotFoundError` — batch is stale, missing, or already finished
 - `PgqueSqlError` — generic SQL failure (with `cause`)
@@ -175,13 +175,13 @@ or `pg.Client` instances in the same process are unaffected.
 
 `send` → ticker → `receive` must each run in its own committed transaction (PgQue is snapshot-based). `pg.Pool#query` satisfies this transparently — every `send`/`receive`/`ack` is its own implicit tx, and the `Consumer` is pool-level.
 
-The footgun is `client.rawPool`: for transactional enqueue, call `BEGIN` / `pgque.send` / `COMMIT` on a checked-out client. Don't mix `pgque.send` and `pgque.receive` in one shared tx; same for `pgque.maint_retry_events` + `pgque.ticker`. See [snapshot rule](https://github.com/NikolayS/pgque/blob/main/docs/pgq-concepts.md#snapshot-rule).
+The one pitfall is `client.rawPool`: for transactional enqueue, call `BEGIN` / `pgque.send` / `COMMIT` on a checked-out client. Don't mix `pgque.send` and `pgque.receive` in one shared tx; same for `pgque.maint_retry_events` + `pgque.ticker`. See [snapshot rule](https://github.com/NikolayS/pgque/blob/main/docs/pgq-concepts.md#snapshot-rule).
 
 ## Tests
 
 The repository standardizes on Bun for TypeScript client development and CI
-commands. The integration tests need a running PostgreSQL with the PgQue schema
-installed and `pgque_admin`-equivalent privileges:
+commands. The integration tests need a running Postgres server with the PgQue
+schema installed and `pgque_admin`-equivalent privileges:
 
 ```bash
 bun install --frozen-lockfile

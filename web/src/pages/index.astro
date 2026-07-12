@@ -24,7 +24,7 @@ const features = [
   {
     n: '01',
     title: 'Zero bloat by design',
-    body: 'Snapshot-based batching and TRUNCATE-based rotation instead of per-row DELETE. No dead tuples in the hot path, immune to xmin-horizon pinning. It does not get slower because it has been running for months.',
+    body: 'Snapshot-based batching and TRUNCATE-based rotation instead of per-row DELETE. No dead tuples in the hot path, immune to xmin-horizon pinning. It does not slow down after months of continuous operation.',
   },
   {
     n: '02',
@@ -44,7 +44,7 @@ const features = [
   {
     n: '05',
     title: 'Built for sustained load',
-    body: 'The same engine PgQ ran at Skype for messaging across hundreds of millions of users, for over a decade. PgQue rebuilds it for the heavy-load regime it was designed for.',
+    body: 'The underlying engine, PgQ, ran messaging at Skype for hundreds of millions of users for over a decade. PgQue rebuilds it for the heavy-load regime it was designed for.',
   },
   {
     n: '06',
@@ -56,10 +56,10 @@ const features = [
 const comparison = {
   /* Columns: PgQue, PgQ, PGMQ, River, Que, pg-boss (matches the README table). */
   rows: [
-    ['Snapshot batching (no row locks)', true, true, false, false, false, false],
+    ['Snapshot-based batching (no row locks)', true, true, false, false, false, false],
     ['Zero bloat under sustained load', true, true, false, false, false, false],
     ['No external daemon or worker binary', true, false, true, false, false, false],
-    ['Pure SQL, managed-Postgres ready', true, false, true, true, true, true],
+    ['Pure SQL install, managed Postgres ready', true, false, true, true, true, true],
     ['Multiple independent consumers (fan-out)', true, true, false, false, false, 'partial'],
     ['Built-in dead letter queue', true, false, 'partial', 'partial', false, true],
   ],
@@ -324,8 +324,8 @@ const platformGroups = [
           <h1>Zero-bloat Postgres queue.</h1>
           <p class="subhead accent">One SQL file to install.</p>
           <p class="lede">
-            A durable event stream that lives inside Postgres — closer to Kafka,
-            a shared log with independent per-consumer cursors, than to a
+            A durable event stream that lives inside Postgres — a shared log
+            with independent per-consumer cursors, closer to Kafka than to a
             task-message broker. Pure SQL and PL/pgSQL on any modern Postgres,
             managed or self-hosted. No sidecar daemon, no C extension.
           </p>

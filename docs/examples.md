@@ -3,7 +3,7 @@ title: Examples
 description: Copy-paste PgQue recipes — fan-out, exactly-once, batch send, recurring jobs, and dead-letter replay.
 ---
 
-Short, copy-paste patterns for common PgQue tasks. Each recipe is goal, SQL, result. For a guided first run see [the tutorial](tutorial.md); for every function signature see [the reference](reference.md). For queue and consumer health see [monitoring](monitoring.md).
+Short, copy-paste patterns for common PgQue tasks. Each recipe follows the same shape: goal, SQL, result. For a guided first run see [the tutorial](tutorial.md); for every function signature see [the reference](reference.md). For queue and consumer health see [monitoring](monitoring.md).
 
 All psql snippets assume psql autocommit (one statement per transaction). Run them with the pager and startup file disabled so output is verbatim:
 
@@ -17,7 +17,7 @@ A few recipes depend on a ticker turning sent events into deliverable batches. I
 
 Goal: deliver every event to several independent consumers, each at its own pace, without duplicating the event per consumer.
 
-Fan-out is native. Every registered consumer keeps its own cursor over the same shared event log — the event is stored once, and each consumer advances independently. This is unlike a SKIP-LOCKED queue, where a row is handed to exactly one worker.
+Fan-out is native. Every registered consumer keeps its own cursor over the same shared event log — the event is stored once, and each consumer advances independently. This is unlike a `SKIP LOCKED` queue, where a row is handed to exactly one worker.
 
 ```sql
 select pgque.subscribe('orders', 'audit_logger');

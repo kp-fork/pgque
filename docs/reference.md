@@ -332,7 +332,7 @@ Grant: `pgque_admin`. Source: [`devel/sql/pgque.sql`](https://github.com/Nikolay
 
 #### `pgque.force_next_tick(queue text) → bigint`
 
-Forces the next `pgque.ticker()` call to materialise a tick for `queue` without waiting for the `ticker_max_count` or `ticker_max_lag` thresholds. Bumps `queue_event_seq` by `ticker_max_count * 2 + 1000` to simulate a burst of events. Does **not** insert a tick itself — call `pgque.ticker()` (or `pgque.ticker(queue)`) afterwards to materialise the tick. Returns the current last tick id (from the most recent existing tick, not a new one). Useful in tests and demos; not for production hot paths. Canonical idiom:
+Forces the next `pgque.ticker()` call to materialize a tick for `queue` without waiting for the `ticker_max_count` or `ticker_max_lag` thresholds. Bumps `queue_event_seq` by `ticker_max_count * 2 + 1000` to simulate a burst of events. Does **not** insert a tick itself — call `pgque.ticker()` (or `pgque.ticker(queue)`) afterwards to materialize the tick. Returns the current last tick id (from the most recent existing tick, not a new one). Useful in tests and demos; not for production hot paths. Canonical idiom:
 
 ```sql
 select pgque.force_next_tick('orders');
@@ -343,7 +343,7 @@ Grant: `pgque_admin`. Source: [`devel/sql/pgque-additions/tick_helpers.sql`](htt
 
 #### `pgque.force_tick(queue text) → bigint`
 
-Alias for `pgque.force_next_tick`. Retained for compatibility with upstream PgQ (the historical name); identical behavior. The name is misleading — the function does not insert a tick by itself, it only bumps the event sequence so the next `pgque.ticker()` call inserts one. Raises if the queue is missing, ticker-paused, or configured for an external ticker. Prefer `force_next_tick` in new code.
+Alias for `pgque.force_next_tick`. Retained for compatibility with upstream PgQ (the historical name); identical behavior. The name is misleading — the function does not insert a tick by itself; it only bumps the event sequence so the next `pgque.ticker()` call inserts one. Raises if the queue is missing, ticker-paused, or configured for an external ticker. Prefer `force_next_tick` in new code.
 Grant: `pgque_admin`. Source: [`devel/sql/pgque.sql`](https://github.com/NikolayS/pgque/blob/main/devel/sql/pgque.sql).
 
 > The `force_next_tick` → `ticker` → `receive` chain (or legacy `force_tick` alias) must run across separate transactions for the consumer to see the events you just sent. See the [snapshot rule](#snapshot-rule).

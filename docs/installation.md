@@ -18,8 +18,8 @@ hands-on walkthrough, then come back here to set up a durable install.
   `pg_current_xact_id()`, which arrived in Postgres 14.
 - Something that calls `pgque.ticker()` periodically. Without a ticker,
   producers can enqueue events but consumers see nothing — see
-  [ticking](#ticking) below. This is the single most common "it isn't working"
-  cause.
+  [ticking](#ticking) below. This is the single most common cause of "it isn't
+  working" reports.
 - Optionally `pg_cron` or `pg_timetable` to drive the ticker for you. PgQue
   itself works without either; they are only used to schedule the maintenance
   calls.
@@ -368,7 +368,7 @@ per queue; see [reference.md](reference.md) for the role-scope details.
 
 ## Upgrading
 
-Upgrades are SQL-file upgrades: re-run [`sql/pgque.sql`](https://github.com/NikolayS/pgque/blob/main/sql/pgque.sql) over the existing install,
+To upgrade, re-run [`sql/pgque.sql`](https://github.com/NikolayS/pgque/blob/main/sql/pgque.sql) over the existing install,
 in a single transaction, as the schema owner or a superuser. From the repository
 root:
 
@@ -392,8 +392,8 @@ select pgque.version();
 
 ## Uninstall
 
-To remove PgQue, run the uninstall script. It best-effort stops the scheduler
-and drops the `pgque` schema with `cascade`:
+To remove PgQue, run the uninstall script. It stops the scheduler on a
+best-effort basis and drops the `pgque` schema with `cascade`:
 
 ```sql
 \i sql/pgque_uninstall.sql

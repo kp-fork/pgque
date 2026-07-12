@@ -428,7 +428,7 @@
   <p class="note">
     <strong>Rotation pinning (R7) — the sharpest cost of N.</strong> Rotation waits
     for the slowest slot's cursor, so one stalled or lagging slot pins rotation for
-    the whole queue and old event tables stop dropping — <em>the bloat pgque exists
+    the whole queue and old event tables stop dropping — <em>the bloat PgQue exists
     to avoid, back with nicer names</em>. It worsens as N grows. A per-slot lag alert
     is mandatory for any slot deployment, and N stays minimal — read-amp and rotation
     pressure both push the same way: keep N small.
@@ -440,7 +440,7 @@
       <ul class="tight yes">
         <li><strong>Core SQL</strong>: receive lock (G2), hash filter, enforced N, the <code>claim_slot</code>/<code>release_slot</code> lease arbitration (server-enforced on receive/ack), a read-only <code>partition_slot_status</code> view, and the resize guard</li>
         <li><strong>Client/user</strong>: the claim loop, poll cadence, when to resize — a buggy loop loses spread, never order</li>
-        <li><strong>No per-interval heartbeat table</strong> — a polling <code>UPDATE</code> to prove liveness is the per-row churn pgque avoids, and stays rejected. The batch-granularity lease is not that: it renews on the receive/ack writes that already happen per batch (zero extra round-trips, no polling thread)</li>
+        <li><strong>No per-interval heartbeat table</strong> — a polling <code>UPDATE</code> to prove liveness is the per-row churn PgQue avoids, and stays rejected. The batch-granularity lease is not that: it renews on the receive/ack writes that already happen per batch (zero extra round-trips, no polling thread)</li>
       </ul>
     </div>
     <div class="panel">
@@ -453,7 +453,7 @@
     </div>
   </div>
   <p class="note">
-    Reframe for the Kafka mind: pgque routing is <em>consume-time</em> (the log carries
+    Reframe for the Kafka mind: PgQue routing is <em>consume-time</em> (the log carries
     only the key; <code>hash%N</code> is applied at receive), so a resize moves no data
     and never blocks producers — no "events stamped under the old N" problem.
   </p>

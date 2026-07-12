@@ -1,6 +1,6 @@
 ---
 title: Monitoring and health
-description: Read PgQue's observability functions, and know what to alert on — ticker lag, consumer lag, a stuck consumer, and dead-letter depth.
+description: Use PgQue's observability functions and know what to alert on — ticker lag, consumer lag, a stuck consumer, and dead-letter depth.
 ---
 
 PgQue exposes its health through a small set of read-only functions. This page
@@ -114,7 +114,7 @@ there are no per-row deletes.
 Rotation is gated on the slowest consumer. Step one of rotation finds the lowest
 `sub_last_tick` across all subscriptions on the queue; if the slowest consumer
 still needs the table about to be truncated, rotation returns zero and skips.
-A consumer that has stopped — crashed, deadlocked, deploy gone wrong, or simply
+A consumer that has stopped — crashed, deadlocked, a deploy gone wrong, or simply
 far too slow — pins that lowest tick and **blocks the TRUNCATE indefinitely.**
 The event tables then grow without bound until the consumer recovers or is
 unsubscribed.

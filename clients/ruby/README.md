@@ -1,7 +1,7 @@
 # pgque
 
 Ruby client for [PgQue](https://github.com/NikolayS/pgque) — the PgQ-based
-universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
+universal Postgres queue. A thin wrapper over the `pgque-api` SQL functions:
 `send`, `send_batch`, `subscribe`, `unsubscribe`, `receive`, `ack`,
 `nack`, `ticker`, `ticker_all`, `force_next_tick`, plus a polling
 `Consumer` with `LISTEN`/`NOTIFY` wakeup.
@@ -12,7 +12,7 @@ universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
 gem install pgque --pre
 ```
 
-`--pre` is required while v0.3.0 is in release-candidate; the latest
+`--pre` is required while v0.3.0 is at the release-candidate stage; the latest
 published version is `0.3.0.rc.1`. Pin the exact version if you prefer:
 
 ```ruby
@@ -86,10 +86,10 @@ section for both paths.
 ### Consumer options
 
 `Consumer.new(..., max_messages: ...)` controls the per-`receive` limit.
-The default is PostgreSQL's `int` maximum, so the consumer requests
+The default is the Postgres `int` maximum, so the consumer requests
 the whole PgQ batch before acknowledging it. `ack` finishes the
 entire underlying PgQ batch, including rows beyond `max_messages`;
-only lower this value when it is at least as large as the queue's
+lower this value only if it stays at least as large as the queue's
 worst-case batch size, otherwise rows past the limit are silently
 skipped by the batch ack.
 
@@ -237,7 +237,7 @@ internally.
 
 ## Tests
 
-Integration tests require a running PostgreSQL with the PgQue schema
+Integration tests require a running Postgres server with the PgQue schema
 installed. Set `PGQUE_TEST_DSN` and run rake:
 
 ```bash

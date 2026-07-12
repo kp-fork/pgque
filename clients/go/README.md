@@ -1,7 +1,7 @@
 # pgque-go
 
 Go client for [PgQue](https://github.com/NikolayS/pgque) — the PgQ-based
-universal PostgreSQL queue. A thin, idiomatic wrapper over the
+universal Postgres queue. A thin, idiomatic wrapper over the
 `pgque-api` SQL functions: `send`, `send_batch`, `subscribe`,
 `unsubscribe`, `receive`, `ack`, `nack`, `ticker`, `ticker_all`, and
 `force_next_tick`.
@@ -125,8 +125,8 @@ err := client.Nack(ctx, batchID, msg, pgque.NackOptions{
 })
 ```
 
-Calls without options preserve the historical defaults: 60-second retry
-delay, NULL reason.
+Calls without options use those same defaults: 60-second retry delay,
+NULL reason.
 
 ## Ack rowcount
 
@@ -156,7 +156,7 @@ prefers redelivery and lets the at-least-once retry path do its job.
 
 ## Typed errors
 
-Client methods wrap PostgreSQL-side failures so callers can route on
+Client methods wrap Postgres-side failures so callers can route on
 recoverable conditions with `errors.Is`:
 
 ```go
@@ -251,11 +251,11 @@ and a final disjoint-delivery summary.
 
 `Send` → ticker → `Receive` must each run in its own committed transaction (PgQue is snapshot-based). `pgxpool` satisfies this transparently — every `Send`/`Receive`/`Ack` is its own implicit tx, and the `Consumer` is pool-level.
 
-The footgun is `Client.Pool()`: calling `pgque.send` inside your own `pgx.Tx` is fine for transactional enqueue, but the consumer must run after `tx.Commit()`. Don't wrap `pgque.send` and `pgque.receive` in one shared `pgx.Tx`; same for `pgque.maint_retry_events` + `pgque.ticker`. See [snapshot rule](https://github.com/NikolayS/pgque/blob/main/docs/pgq-concepts.md#snapshot-rule).
+The one pitfall is `Client.Pool()`: calling `pgque.send` inside your own `pgx.Tx` is fine for transactional enqueue, but the consumer must run after `tx.Commit()`. Don't wrap `pgque.send` and `pgque.receive` in one shared `pgx.Tx`; same for `pgque.maint_retry_events` + `pgque.ticker`. See [snapshot rule](https://github.com/NikolayS/pgque/blob/main/docs/pgq-concepts.md#snapshot-rule).
 
 ## Tests
 
-The integration tests require a running PostgreSQL with the PgQue schema
+The integration tests require a running Postgres server with the PgQue schema
 installed. Set `PGQUE_TEST_DSN` to point at it:
 
 ```bash

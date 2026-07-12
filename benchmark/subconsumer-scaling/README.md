@@ -1,4 +1,4 @@
-# subconsumer scaling demo
+# Subconsumer scaling demo
 
 Focused benchmark + visualization harness for the `250 ms / message` story.
 
