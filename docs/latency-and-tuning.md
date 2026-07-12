@@ -3,8 +3,8 @@ title: Latency and tick tuning
 description: The three queue latencies, why end-to-end delivery tracks the tick period, and how to tune tick cadence.
 ---
 
-"Queue latency" is three numbers, not one. Conflating them confuses design
-discussion — each reflects a different bottleneck, and PgQue's trade-offs only
+"Queue latency" is three numbers, not one. Conflating them muddies design
+discussions — each reflects a different bottleneck, and PgQue's trade-offs only
 make sense once they are separated. This page explains the three latencies, why
 the third one is what your application actually feels, and how to tune it with
 the tick period.
@@ -109,7 +109,7 @@ Postgres 16, `pg_cron` with `use_background_workers = on`; 100 ev/s producer,
 committed run at the same period ([`results-baseline.json`](https://github.com/NikolayS/pgque/blob/main/benchmark/tick-rate/results-baseline.json)) saw a max of about
 145 ms; treat the default-tick worst case as ~105–145 ms.
 
-At the default the distribution is clean: p50 ≈ 52 ms, p95 ≈ 99 ms, max
+At the default period the distribution is clean: p50 ≈ 52 ms, p95 ≈ 99 ms, max
 ≈ 105–145 ms across the committed runs — tracking "wait for the next tick,
 mean ≈ period/2". At 10 ms and
 1 ms the median drops to single digits, but the benchmark shows the tail
@@ -199,7 +199,7 @@ job run. PgQue runs a fixed set of jobs (the ticker once a second plus the
 maintenance jobs), so this table grows steadily over time. The sub-second tick
 loop does not multiply the count — there is still one ticker slot per second
 regardless of `tick_period_ms` — but on a small deployment the successful-run
-history can still dominate unless you trim it.
+history can still dominate the table unless you trim it.
 
 A scoped purge keeps only PgQue's own job history bounded, leaving unrelated
 jobs untouched:

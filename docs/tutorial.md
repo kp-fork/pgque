@@ -3,7 +3,7 @@ title: Tutorial
 description: A hands-on PgQue walkthrough — install, send, tick, receive, retry, dead-letter, and health checks, end to end.
 ---
 
-A guided, hands-on walkthrough. With `psql` access to a Postgres 14+ database and about ten minutes, you can follow every step end to end. You will type SQL, see what comes back, and build an intuition for how PgQue moves messages through an order-processing queue.
+A guided, hands-on walkthrough of PgQue. With `psql` access to a Postgres 14+ database and about ten minutes, you can follow every step end to end. You will type SQL, see what comes back, and build an intuition for how PgQue moves messages through an order-processing queue.
 
 By the end you will have a working `orders` queue with a `processor` consumer, a happy-path delivery, a retry that reappears after a delay, a message driven all the way to the dead-letter queue, and a health check.
 
@@ -45,7 +45,7 @@ select pgque.version();
 
 The install creates the `pgque` schema, three roles (`pgque_reader`, `pgque_writer`, `pgque_admin`), and every function you call in the rest of this tutorial. The roles are siblings, not parent and child: `pgque_writer` produces (`send`, `send_batch`); `pgque_reader` consumes (`subscribe`, `receive`, `ack`, `nack`); `pgque_admin` is a member of both.
 
-Following along as the install owner needs no extra grants — skip the next snippet. In production you grant the roles to your own app roles. An app that both produces and consumes needs both roles:
+If you are following along as the install owner, you need no extra grants — skip the next snippet. In production you grant the roles to your own app roles. An app that both produces and consumes needs both roles:
 
 ```sql
 -- produce and consume:
@@ -58,7 +58,7 @@ grant pgque_writer to app_webhook;
 grant pgque_reader to metrics;
 ```
 
-See [Installation & operations](installation.md) for the full role and grant story.
+See [Installation & operations](installation.md) for the full role and grant details.
 
 ## Step 2: Create the queue and the consumer
 
@@ -116,7 +116,7 @@ select * from pgque.receive('orders', 'processor', 100);
 
 Zero rows. This surprises every first-time user, and it is not an error. Here is why.
 
-PgQue is tick-based, not row-claiming. Producers append events, but consumers do not see rows directly — they see batches. A batch is the set of events between two ticks. Until a tick happens there is no batch boundary, so `pgque.receive` has nothing to return and reports zero rows.
+PgQue is tick-based, not row-claiming. Producers append events, but consumers do not see rows directly — they see batches. A batch is the set of events between two ticks. Until a tick happens, there is no batch boundary, so `pgque.receive` has nothing to return and reports zero rows.
 
 In normal operation a scheduler (`pg_cron` or an external loop) drives ticks continuously — PgQue ticks 10 times per second by default (every 100 ms). In this tutorial you have not started a scheduler, so no tick has run yet. That is the next step.
 
@@ -160,7 +160,7 @@ select * from pgque.receive('orders', 'processor', 100);
 
 The event is back. `retry_count` is null because this is the first delivery attempt. The `batch_id` is the value you need for the next step. (The `jsonb` overload stored a canonical form, so the keys come back ordered by length then alphabetically — `"total"` before `"order_id"` — rather than in the order you typed them.)
 
-In production you never call `force_next_tick`: `pg_cron` runs the ticker continuously, or an external worker loop calls `pgque.ticker()` on its own cadence. `force_next_tick` exists exactly for the situation here — advancing one queue on demand without waiting on the tick thresholds.
+In production you never call `force_next_tick`: `pg_cron` runs the ticker continuously, or an external worker loop calls `pgque.ticker()` on its own cadence. `force_next_tick` exists precisely for the situation here — advancing one queue on demand without waiting on the tick thresholds.
 
 ## Step 6: Ack the batch
 
@@ -196,7 +196,7 @@ Every row `pgque.receive` returns is a `pgque.message` composite: `msg_id` (PgQ'
 
 ## Step 7: Send a bad order, nack with a delay, watch it reappear
 
-Consumers sometimes fail. `nack` handles that: it schedules the message for redelivery after a delay you choose, and routes it to the dead-letter queue once it has exhausted its retries. By default a message retries up to 5 times before the DLQ. To reach the DLQ quickly in step 8, lower the ceiling first:
+Consumers sometimes fail. `nack` handles that: it schedules the message for redelivery after a delay you choose, and routes the message to the dead-letter queue once it has exhausted its retries. By default a message retries up to 5 times before the DLQ. To reach the DLQ quickly in step 8, lower the ceiling first:
 
 ```sql
 select pgque.set_queue_config('orders', 'max_retries', '2');
@@ -290,7 +290,7 @@ from pgque.dlq_inspect('orders');
 (1 row)
 ```
 
-From here you have two moves. Once the upstream bug is fixed, replay the event onto the queue — it re-enters with a fresh event id and is delivered on the next tick, and the DLQ row is removed:
+From here you have two options. Once the upstream bug is fixed, replay the event onto the queue — it re-enters with a fresh event id and is delivered on the next tick, and the DLQ row is removed:
 
 ```sql
 select pgque.dlq_replay(1);
@@ -304,7 +304,7 @@ select pgque.dlq_purge('orders', '0 seconds'::interval);
 
 ## Step 9: Check queue and consumer health
 
-Two observability functions read out queue and consumer health; `status()` rolls them up.
+Two observability functions report queue and consumer health; `status()` rolls them up.
 
 ```sql
 select queue_name, ticker_lag, ev_new, last_tick_id
@@ -357,7 +357,7 @@ select * from pgque.status();
 
 ## Where to go from here
 
-You have driven the ticker by hand all the way through. In production you let a scheduler do it — one call, `select pgque.start();`, schedules `pg_cron` to run the ticker (and the maintenance jobs) for you, so messages flow without manual ticks and land within roughly 50 ms median at the default 100 ms tick.
+You have driven the ticker by hand all the way through. In production you let a scheduler do it — one call, `select pgque.start();`, schedules `pg_cron` to run the ticker (and the maintenance jobs) for you, so messages flow without manual ticks and land with a median latency of roughly 50 ms at the default 100 ms tick.
 
 To tear down the queue you built here:
 

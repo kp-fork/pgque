@@ -1,7 +1,7 @@
 # pgque-py
 
 Python client for [PgQue](https://github.com/NikolayS/pgque) — the PgQ-based
-universal PostgreSQL queue. Thin wrapper over `pgque-api` SQL functions:
+universal Postgres queue. A thin wrapper over the `pgque-api` SQL functions:
 `send`, `send_batch`, `subscribe`, `unsubscribe`, `receive`, `ack`,
 `nack`, `ticker`, `ticker_all`, `force_next_tick`, plus a polling
 `Consumer` with `LISTEN`/`NOTIFY` wakeup.
@@ -71,10 +71,10 @@ consumer.start()  # blocks until SIGTERM / SIGINT
 ### Consumer options
 
 `Consumer(..., max_messages=...)` controls the per-`receive` limit.
-The default is PostgreSQL's `int` maximum, so the consumer requests
+The default is the Postgres `int` maximum, so the consumer requests
 the whole PgQ batch before acknowledging it. `ack()` finishes the
 entire underlying PgQ batch, including rows beyond `max_messages`;
-only lower this value when it is at least as large as the queue's
+lower this value only if it stays at least as large as the queue's
 worst-case batch size, otherwise rows past the limit are silently
 skipped by the batch ack.
 
@@ -175,14 +175,14 @@ client.conn.commit()
 
 ## Transactions
 
-`send` → ticker → `receive` must each run in its own committed transaction (PgQue is snapshot-based). `pgque.connect(dsn)` is non-autocommit by default — commit between produce and consumer. The `Consumer` is autocommit + explicit `conn.transaction()` around `receive + dispatch + ack`.
+`send` → ticker → `receive` must each run in its own committed transaction (PgQue is snapshot-based). `pgque.connect(dsn)` is non-autocommit by default — commit between producing and consuming. The `Consumer` uses autocommit plus an explicit `conn.transaction()` around `receive + dispatch + ack`.
 
 Don't wrap `send` and `receive` in one explicit tx; same for `maint_retry_events` + `ticker`. See [snapshot rule](https://github.com/NikolayS/pgque/blob/main/docs/pgq-concepts.md#snapshot-rule).
 
 
 ## Tests
 
-Integration tests require a running PostgreSQL with the PgQue schema
+Integration tests require a running Postgres server with the PgQue schema
 installed. Set `PGQUE_TEST_DSN` and run pytest:
 
 ```bash

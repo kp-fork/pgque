@@ -1,6 +1,6 @@
 # Bench methodology — the definitive reference
 
-This document is the single source of truth for how the PostgreSQL-queue bench is structured, what it measures, and every script/config that makes it work. It is written so a reviewer can reproduce the whole thing end-to-end.
+This document is the single source of truth for how the Postgres queue bench is structured, what it measures, and every script/config that makes it work. It is written so a reviewer can reproduce the whole thing end-to-end.
 
 Cross-links:
 
@@ -24,7 +24,7 @@ Seven systems, each on its own VM:
 | que | v2.4 | SKIP LOCKED + DELETE (consumer emulated) |
 | pg-boss | v12.15 | SKIP LOCKED + DELETE on partitioned `pgboss.job` |
 
-The Go/Ruby/Node workers are installed end-to-end so the schema is authentic, but the actual consumer load is driven via pgbench running each system's *SQL claim pattern*. This isolates the DB-side behaviour from runtime/GC artefacts.
+The Go/Ruby/Node workers are installed end-to-end so the schema is authentic, but the actual consumer load is driven via pgbench running each system's *SQL claim pattern*. This isolates the DB-side behavior from runtime/GC artifacts.
 
 Workload shape (all runs):
 
@@ -43,7 +43,7 @@ Workload shape (all runs):
 - Spot where available; on-demand only as last resort (see Section 10)
 - Ubuntu 24.04, **PG18 from PGDG**, `pg_cron`, `pg_stat_statements`, pg_ash, pgfr
 - Data dir moved to NVMe: `/mnt/pgdata/postgresql/18/main` symlink (see [runners/fix_nvme_mount.sh](runners/fix_nvme_mount.sh) and [OPS_GOTCHAS.md §1](OPS_GOTCHAS.md))
-- One VM per system so any tuning / runtime / GC behaviour is contained
+- One VM per system so any tuning / runtime / GC behavior is contained
 - SSH key: `<your-ssh-key>` (us-east-2)
 
 VM IPs use placeholder form: `<pgque-ip>`, `<pgq-ip>`, `<pgmq-ip>`, `<river-ip>`, `<pgboss-ip>`, `<que-ip>`, `<pgmq-partitioned-ip>`.

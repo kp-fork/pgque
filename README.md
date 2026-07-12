@@ -15,7 +15,7 @@
 
 Discussion on [Hacker News](https://news.ycombinator.com/item?id=47817349).
 
-*For teams who want a durable event stream inside Postgres. The model is closer to Kafka (log) than to ActiveMQ or RabbitMQ (task message queue). Shared event log, independent per-consumer cursors, zero bloat under sustained load. Pure SQL and PL/pgSQL, any Postgres 14+ — managed or self-hosted, no sidecar daemon. The rest of this README walks the history, comparison, and install paths that back up the claim.*
+*For teams who want a durable event stream inside Postgres. The model is closer to Kafka (log) than to ActiveMQ or RabbitMQ (task message queue). Shared event log, independent per-consumer cursors, zero bloat under sustained load. Pure SQL and PL/pgSQL, any Postgres 14+ — managed or self-hosted, no sidecar daemon. The rest of this README walks through the history, comparison, and install paths that back up the claim.*
 
 ## Contents
 
@@ -38,11 +38,11 @@ Discussion on [Hacker News](https://news.ycombinator.com/item?id=47817349).
 
 PgQue brings back [PgQ](https://github.com/pgq/pgq) — one of the longest-running Postgres queue architectures in production — in a form that runs on any Postgres platform, managed providers included.
 
-PgQ was designed at Skype in 2006 to run messaging for hundreds of millions of users, and it ran on large self-managed Postgres deployments for over a decade. Standard PgQ depends on a C extension (`pgq`) and an external daemon (`pgqd`), neither of which run on most managed Postgres providers.
+PgQ was designed at Skype in 2006 to run messaging for hundreds of millions of users, and it ran on large self-managed Postgres deployments for over a decade. Standard PgQ depends on a C extension (`pgq`) and an external daemon (`pgqd`), neither of which runs on most managed Postgres providers.
 
 PgQue rebuilds that battle-tested engine in pure PL/pgSQL, so the zero-bloat queue pattern works anywhere you can run SQL — without adding another distributed system to your stack.
 
-It is the same engine – PgQ – repackaged for managed Postgres, and provided with client libraries for TypeScript, Python, and Go.
+It is the same engine – PgQ – repackaged for managed Postgres, with client libraries for TypeScript, Python, and Go.
 
 **The anti-extension.** Pure SQL + PL/pgSQL on any Postgres 14+ — including RDS, Aurora, Cloud SQL, AlloyDB, Supabase, Neon, and most other managed providers. No C extension, no `shared_preload_libraries`, no provider approval, no restart.
 
@@ -53,7 +53,7 @@ Historical context, two decks:
 
 External coverage:
 
-- [PgQue: Two Snapshots and a Diff](https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/) by Christophe Pettus — walk-through of the snapshot/diff mechanism: how two consecutive tick snapshots determine event visibility and why that avoids row-level locks and dead tuple bloat.
+- [PgQue: Two Snapshots and a Diff](https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/) by Christophe Pettus — a walkthrough of the snapshot/diff mechanism: how two consecutive tick snapshots determine event visibility and why that avoids row-level locks and dead tuple bloat.
 - [HN discussion](https://news.ycombinator.com/item?id=47817349)
 
 ## Why PgQue
@@ -64,7 +64,7 @@ PgQue avoids that whole class of problems. It uses **snapshot-based batching** a
 
 - **Zero bloat by design** — no dead tuples in the main queue path
 - **No performance decay** — it does not get slower because it has been running for months
-- **Built for heavy-loaded systems** — the sustained-load regime the original PgQ architecture was designed for
+- **Built for heavily loaded systems** — the sustained-load regime the original PgQ architecture was designed for
 - **Real Postgres guarantees** — ACID transactions, transactional enqueue/consume, WAL, backups, replication, SQL visibility
 - **Works on managed Postgres** — no custom build, no C extension, no separate daemon
 
@@ -125,7 +125,7 @@ See [docs/latency-and-tuning.md](docs/latency-and-tuning.md) for the breakdown, 
 
 Oban Pro shipped table partitioning to mitigate it; PGMQ ships aggressive autovacuum settings. PgQue's TRUNCATE rotation creates zero dead tuples by construction. No tuning. Immune to xmin horizon pinning.
 
-**2. Native fan-out.** Each registered consumer maintains its own cursor on a shared event log and independently receives all events. That is different from competing-consumers (SKIP LOCKED) where each job goes to one worker. pg-boss has fan-out but it is copy-per-queue (one INSERT per subscriber per event). PgQue's model is a position on a shared log — no data duplication, atomic batch boundaries, late subscribers catch up. Closer to Kafka topics than to a job queue.
+**2. Native fan-out.** Each registered consumer maintains its own cursor on a shared event log and independently receives all events. That is different from the competing-consumers model (SKIP LOCKED), where each job goes to one worker. pg-boss has fan-out but it is copy-per-queue (one INSERT per subscriber per event). PgQue's model is a position on a shared log — no data duplication, atomic batch boundaries, late subscribers catch up. Closer to Kafka topics than to a job queue.
 
 ### When to use PgQue vs. a job queue
 
@@ -186,7 +186,7 @@ select pgque.start_timetable(10);
 
 PgQue ticks **10 times per second by default** (every 100 ms), even though `pg_cron`'s minimum schedule is 1 second. `pgque.start()` schedules a single 1-second pg_cron slot that calls `CALL pgque.ticker_loop()`; `pgque.start_timetable()` schedules the same loop through one pg_timetable `@every 1 second` job. The procedure then re-invokes `pgque.ticker()` every `tick_period_ms` ms inside that slot, committing between iterations so each tick gets its own transaction (snapshot semantics; bounded held-xmin so rotation isn't blocked).
 
-Tune at runtime — no need to call `start()` again, the change picks up on the next scheduler slot (≤1 s):
+Tune at runtime — no need to call `start()` again; the change picks up on the next scheduler slot (≤1 s):
 
 ```sql
 select pgque.set_tick_period_ms(50);    -- 20 ticks/sec
@@ -325,7 +325,7 @@ select * from pgque.receive('orders', 'processor', 100);
 select pgque.ack(1);
 ```
 
-Send, tick, and receive **must** run in separate transactions — that's a hard requirement of PgQ's snapshot-based design, not a recommendation. A `tick` records a snapshot of committed transaction IDs; a `send` in the same xact is still in-progress at that moment and gets excluded from the next batch's visibility window, so the event never surfaces. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_next_tick()` is mainly for demos, tests, and manual operation. In application code, capture `batch_id` from any returned row and pass it to `ack`.
+Send, tick, and receive **must** run in separate transactions — that's a hard requirement of PgQ's snapshot-based design, not a recommendation. A `tick` records a snapshot of committed transaction IDs; a `send` in the same xact is still in progress at that moment and gets excluded from the next batch's visibility window, so the event never surfaces. In normal operation, `pg_cron` or an external scheduler drives `pgque.ticker()`; `force_next_tick()` is mainly for demos, tests, and manual operation. In application code, capture `batch_id` from any returned row and pass it to `ack`.
 
 The scriptable psql idiom (replaces tx 4 + tx 5 above):
 
@@ -481,7 +481,7 @@ scaling story is easy to see without mixing in producer cadence or tick tuning.
 This is the use case that keeps coming up: the queue itself is fast, but the
 downstream side effect is not. If one message means one transactional email API
 call (Resend, SendGrid), one SMS request, one webhook, or one slow HTTP POST,
-then consumer-side parallelism is what decides whether the backlog melts or
+then consumer-side parallelism is what decides whether the backlog drains or
 lingers.
 
 Cooperative consumers ship in the default install but are **experimental in
@@ -497,7 +497,7 @@ SendGrid — then increases only the number of subconsumers.
 
 The takeaway is qualitative: when downstream work dominates, a single consumer
 is throughput-bound by that work, and adding cooperative subconsumers scales
-throughput and backlog drain close to linearly until some other bottleneck
+throughput and backlog drain nearly linearly until some other bottleneck
 shows up. The harness above lets you reproduce that on your own hardware.
 
 ## Architecture

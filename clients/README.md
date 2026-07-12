@@ -1,8 +1,8 @@
 # PgQue clients
 
-PgQue ships four first-party clients. They are thin wrappers over `pgque.*`
-SQL primitives. The matrix below tracks the public client API on current
-`main`.
+PgQue ships four first-party clients (Python, Go, TypeScript, Ruby), all thin
+wrappers over the `pgque.*` SQL primitives. The matrix below tracks the public
+client API on current `main`.
 
 ## Release quality rules
 
@@ -12,8 +12,8 @@ out-of-scope for that release.
 
 ### API parity is required
 
-First-party clients must expose the same public PgQue capabilities in idiomatic
-language shape. If Python exposes a normal consumer primitive, Go and
+First-party clients must expose the same public PgQue capabilities in each
+language's idiomatic shape. If Python exposes a normal consumer primitive, Go and
 TypeScript should expose it too; if TypeScript has a ticker helper, Python and
 Go should have equivalent helpers. Drift is acceptable only when it is a
 conscious product decision and recorded here or in the release issue.
@@ -48,8 +48,8 @@ Current published client producer results live in
 `benchmark/charts/client_producer_batch_api.csv` and
 `benchmark/charts/client_producer_batch_api.svg`. If benchmark results are
 published, update both files and state the environment used for the run. Stale
-charts are worse than no charts; they give users false confidence, which is how
-benchmarks become marketing-shaped lies.
+charts are worse than no charts: they give users false confidence in numbers
+that no longer hold.
 
 ### Testing gates
 
@@ -70,7 +70,7 @@ For any client release candidate or final release:
 
 Release prep PRs must update user-facing install commands and remove stale
 prerelease wording. When publishing a final release, docs must stop telling
-users to install `--pre`, `@rc`, or an `-rc` Go tag.
+users to install with `--pre`, `@rc`, or an `-rc` Go tag.
 
 ## Current parity matrix
 
@@ -79,7 +79,7 @@ users to install `--pre`, `@rc`, or an `-rc` Go tag.
 | `connect` / `close` | ✓ | ✓ | ✓ | ✓ |
 | Raw SQL escape hatch | ✓ (`conn`) | ✓ (`Pool()`) | ✓ (`rawPool`) | ✓ (`conn`) |
 | PgQue-classified errors | ✓ | ✓ | ✓ | ✓ |
-| Lossless PostgreSQL `bigint` IDs | ✓ (`int`) | ✓ (`int64`) | ✓ (`bigint`) | ✓ (`Integer`) |
+| Lossless Postgres `bigint` IDs | ✓ (`int`) | ✓ (`int64`) | ✓ (`bigint`) | ✓ (`Integer`) |
 | `send` | ✓ | ✓ | ✓ | ✓ |
 | `send_batch` / `SendBatch` / `sendBatch` | ✓ | ✓ | ✓ | ✓ |
 | `receive` | ✓ | ✓ | ✓ | ✓ |

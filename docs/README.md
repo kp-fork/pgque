@@ -3,7 +3,7 @@ title: PgQue docs
 description: Tutorial, reference, examples, monitoring, and concepts for PgQue — the zero-bloat Postgres queue.
 ---
 
-Short docs for users, plus a contributor primer.
+Documentation for PgQue, the zero-bloat Postgres queue: a hands-on tutorial, operations guides, a function reference, and the concepts behind the design, plus a contributor primer.
 
 ## Get started
 
@@ -35,5 +35,5 @@ Short docs for users, plus a contributor primer.
 
 For the full specification and implementation plan, see
 [`blueprints/SPECx.md`](https://github.com/NikolayS/pgque/blob/main/blueprints/SPECx.md).
-For what ships in the default install vs experimental, see
+For what ships in the default install versus what is experimental, see
 [`blueprints/PHASES.md`](https://github.com/NikolayS/pgque/blob/main/blueprints/PHASES.md).
