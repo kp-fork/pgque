@@ -535,7 +535,7 @@ const platformGroups = [
         <p class="section-sub">Independent analysis, conversations, and coverage of PgQue in 2026.</p>
         <div class="community-grid">
           <article class="media-card">
-            <div class="media-shell" data-video-id="bBNcR14Ts4U">
+            <div class="media-shell" data-video-id="bBNcR14Ts4U" data-video-title="Postgres.fm: PgQue">
               <a class="media-facade" href="https://www.youtube.com/watch?v=bBNcR14Ts4U" target="_blank" rel="noopener" aria-label="Play Postgres.fm: PgQue on YouTube">
                 <span class="media-signal" aria-hidden="true">
                   <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
@@ -548,31 +548,51 @@ const platformGroups = [
                 <span class="media-meta">Nikolay Samokhvalov · Michael Christofides · 2026</span>
               </a>
             </div>
+            <p class="media-summary">
+              A 47-minute deep dive into why update/delete queues degrade: <code>SKIP LOCKED</code>, MVCC and vacuum, snapshot-based batching, three-table rotation, and PgQue's latency trade-offs.
+            </p>
             <div class="media-links">
               <a href="https://postgres.fm/episodes/pgque" target="_blank" rel="noopener">Episode notes<span class="ext-arrow" aria-hidden="true">↗</span></a>
+              <a href="https://postgres.fm/episodes/pgque/transcript" target="_blank" rel="noopener">Transcript<span class="ext-arrow" aria-hidden="true">↗</span></a>
             </div>
           </article>
 
-          <div class="coverage-list">
-            <a class="coverage-card" href="https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/" target="_blank" rel="noopener">
-              <span class="coverage-source">Christophe Pettus · 2026</span>
-              <strong>PgQue: Two Snapshots and a Diff</strong>
-              <span>An independent technical walk-through of how PgQue avoids row locks and dead-tuple bloat.</span>
-              <span class="coverage-arrow" aria-hidden="true">↗</span>
-            </a>
-            <a class="coverage-card" href="https://www.scalingpostgres.com/episodes/416-zero-bloat-postgres-queue/" target="_blank" rel="noopener">
-              <span class="coverage-source">Scaling Postgres · 2026</span>
-              <strong>Zero Bloat Postgres Queue</strong>
-              <span>PgQue highlighted as the lead story in episode 416.</span>
-              <span class="coverage-arrow" aria-hidden="true">↗</span>
-            </a>
-            <a class="coverage-card" href="https://postgresweekly.com/issues/645" target="_blank" rel="noopener">
-              <span class="coverage-source">Postgres Weekly · 2026</span>
-              <strong>A Kafka-like pure SQL queue for Postgres</strong>
-              <span>PgQue featured as the headline of issue 645.</span>
-              <span class="coverage-arrow" aria-hidden="true">↗</span>
-            </a>
-          </div>
+          <article class="media-card">
+            <div class="media-shell" data-video-id="ULpnamtBZFM" data-video-title="Scaling Postgres 416: Zero Bloat Postgres Queue">
+              <a class="media-facade" href="https://www.youtube.com/watch?v=ULpnamtBZFM" target="_blank" rel="noopener" aria-label="Play Scaling Postgres 416 on YouTube">
+                <span class="media-signal" aria-hidden="true">
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </span>
+                <span class="media-play" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="30" height="30"><path fill="currentColor" d="M8 5v14l11-7z" /></svg>
+                </span>
+                <span class="media-show">Scaling Postgres</span>
+                <span class="media-title">Zero Bloat Postgres Queue</span>
+                <span class="media-meta">Episode 416 · 2026</span>
+              </a>
+            </div>
+            <p class="media-summary">
+              A concise tour of PgQue's pure-SQL installation, snapshot diff, three-table rotation, and 50–150 ms latency trade-off, followed by the week's wider Postgres news.
+            </p>
+            <div class="media-links">
+              <a href="https://www.scalingpostgres.com/episodes/416-zero-bloat-postgres-queue/" target="_blank" rel="noopener">Episode notes and transcript<span class="ext-arrow" aria-hidden="true">↗</span></a>
+            </div>
+          </article>
+        </div>
+
+        <div class="coverage-list">
+          <a class="coverage-card" href="https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/" target="_blank" rel="noopener">
+            <span class="coverage-source">Christophe Pettus · 2026</span>
+            <strong>PgQue: Two Snapshots and a Diff</strong>
+            <span>An independent technical walk-through of how PgQue avoids row locks and dead-tuple bloat.</span>
+            <span class="coverage-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="coverage-card" href="https://postgresweekly.com/issues/645" target="_blank" rel="noopener">
+            <span class="coverage-source">Postgres Weekly · 2026</span>
+            <strong>A Kafka-like pure SQL queue for Postgres</strong>
+            <span>PgQue featured as the headline of issue 645.</span>
+            <span class="coverage-arrow" aria-hidden="true">↗</span>
+          </a>
         </div>
         <p class="community-more">
           <a href="/docs/concepts#further-learning">See all talks, articles, and historical background →</a>
@@ -720,7 +740,7 @@ const platformGroups = [
             event.preventDefault();
             const frame = document.createElement('iframe');
             frame.src = `https://www.youtube-nocookie.com/embed/${shell.dataset.videoId}?autoplay=1`;
-            frame.title = 'Postgres.fm: PgQue';
+            frame.title = shell.dataset.videoTitle || 'PgQue video';
             frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
             frame.allowFullscreen = true;
             frame.referrerPolicy = 'strict-origin-when-cross-origin';
@@ -1078,7 +1098,7 @@ const platformGroups = [
       /* community coverage */
       .community { padding: var(--section-y) 0; }
       .community-grid {
-        display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 20px; align-items: stretch;
       }
       .media-card {
@@ -1130,12 +1150,20 @@ const platformGroups = [
         font-size: clamp(1.55rem, 3vw, 2.25rem); font-weight: 700; line-height: 1.05;
       }
       .media-meta { margin-top: 13px; color: #bcb7ac; font-size: 0.82rem; }
+      .media-summary {
+        margin: 0; padding: 18px 18px 16px; color: var(--muted);
+        font-size: 0.91rem; line-height: 1.55;
+      }
+      .media-summary code { font-size: 0.83em; }
       .media-links {
-        display: flex; justify-content: space-between; gap: 16px; padding: 14px 18px;
+        display: flex; justify-content: space-between; gap: 16px; margin-top: auto; padding: 14px 18px;
         border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 0.82rem;
       }
       .media-links a { font-family: var(--mono); font-weight: 600; }
-      .coverage-list { display: grid; grid-template-rows: repeat(3, 1fr); gap: 12px; }
+      .coverage-list {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px; margin-top: 20px;
+      }
       .coverage-card {
         position: relative; display: flex; flex-direction: column; justify-content: center;
         min-width: 0; padding: 21px 48px 21px 22px;
@@ -1384,6 +1412,7 @@ const platformGroups = [
         .split { grid-template-columns: 1fr; gap: 30px; }
         .feature-grid { grid-template-columns: 1fr; }
         .community-grid { grid-template-columns: 1fr; }
+        .coverage-list { grid-template-columns: 1fr; }
         .client-row { grid-template-columns: repeat(2, 1fr); max-width: 520px; }
         .nav-links a:nth-child(3) { display: none; }
         .gh-star span:not(.gh-count) { display: none; }
