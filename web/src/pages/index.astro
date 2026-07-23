@@ -405,6 +405,56 @@ const platformGroups = [
         </div>
       </section>
 
+      <section class="community reveal" id="community">
+        <h2 class="section-title anchored"><a class="anchor-link" href="#community" aria-label="Link to this section">#</a>PgQue in the community</h2>
+        <p class="section-sub">Independent analysis, conversations, and coverage of PgQue in 2026.</p>
+        <div class="community-grid">
+          <article class="media-card">
+            <div class="media-shell" data-video-id="bBNcR14Ts4U">
+              <a class="media-facade" href="https://www.youtube.com/watch?v=bBNcR14Ts4U" target="_blank" rel="noopener" aria-label="Play Postgres.fm: PgQue on YouTube">
+                <span class="media-signal" aria-hidden="true">
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                </span>
+                <span class="media-play" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="30" height="30"><path fill="currentColor" d="M8 5v14l11-7z" /></svg>
+                </span>
+                <span class="media-show">Postgres.fm</span>
+                <span class="media-title">PgQue: a zero-bloat queue for Postgres</span>
+                <span class="media-meta">Nikolay Samokhvalov · Michael Christofides · 2026</span>
+              </a>
+            </div>
+            <div class="media-links">
+              <a href="https://postgres.fm/episodes/pgque" target="_blank" rel="noopener">Episode notes<span class="ext-arrow" aria-hidden="true">↗</span></a>
+              <span>Loads YouTube only when played</span>
+            </div>
+          </article>
+
+          <div class="coverage-list">
+            <a class="coverage-card" href="https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/" target="_blank" rel="noopener">
+              <span class="coverage-source">Christophe Pettus · 2026</span>
+              <strong>PgQue: Two Snapshots and a Diff</strong>
+              <span>An independent technical walk-through of how PgQue avoids row locks and dead-tuple bloat.</span>
+              <span class="coverage-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a class="coverage-card" href="https://www.scalingpostgres.com/episodes/416-zero-bloat-postgres-queue/" target="_blank" rel="noopener">
+              <span class="coverage-source">Scaling Postgres · 2026</span>
+              <strong>Zero Bloat Postgres Queue</strong>
+              <span>PgQue highlighted as the lead story in episode 416.</span>
+              <span class="coverage-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a class="coverage-card" href="https://postgresweekly.com/issues/645" target="_blank" rel="noopener">
+              <span class="coverage-source">Postgres Weekly · 2026</span>
+              <strong>A Kafka-like pure SQL queue for Postgres</strong>
+              <span>PgQue featured as the headline of issue 645.</span>
+              <span class="coverage-arrow" aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+        <p class="community-more">
+          <a href="/docs/concepts#further-learning">See all talks, articles, and historical background →</a>
+        </p>
+      </section>
+
       <section class="band" id="compare">
         <div class="band-inner reveal">
           <h2 class="section-title anchored"><a class="anchor-link" href="#compare" aria-label="Link to this section">#</a>How it compares</h2>
@@ -661,6 +711,23 @@ const platformGroups = [
           onScroll();
           window.addEventListener('scroll', onScroll, { passive: true });
         }
+
+        // No YouTube request is made until the visitor explicitly presses play.
+        // The normal link remains the no-JS fallback.
+        document.querySelectorAll('[data-video-id]').forEach((shell) => {
+          const link = shell.querySelector('.media-facade');
+          if (!link) return;
+          link.addEventListener('click', (event) => {
+            event.preventDefault();
+            const frame = document.createElement('iframe');
+            frame.src = `https://www.youtube-nocookie.com/embed/${shell.dataset.videoId}?autoplay=1`;
+            frame.title = 'Postgres.fm: PgQue';
+            frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+            frame.allowFullscreen = true;
+            frame.referrerPolicy = 'strict-origin-when-cross-origin';
+            shell.replaceChildren(frame);
+          }, { once: true });
+        });
 
         // Scroll reveals via IntersectionObserver. Must NEVER leave content hidden.
         const items = document.querySelectorAll('.reveal');
@@ -1009,6 +1076,87 @@ const platformGroups = [
       .feature-card h3 { margin: 10px 0 10px; font-size: 1.15rem; color: var(--text); letter-spacing: 0; }
       .feature-card p { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.62; }
 
+      /* community coverage */
+      .community { padding: var(--section-y) 0; }
+      .community-grid {
+        display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+        gap: 20px; align-items: stretch;
+      }
+      .media-card {
+        display: flex; flex-direction: column; min-width: 0;
+        border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--panel); overflow: hidden;
+      }
+      .media-shell { aspect-ratio: 16 / 9; min-height: 0; background: #10141a; }
+      .media-shell iframe { display: block; width: 100%; height: 100%; border: 0; }
+      .media-facade {
+        position: relative; display: flex; height: 100%; padding: 34px;
+        flex-direction: column; justify-content: flex-end; overflow: hidden;
+        color: #f5f1e8; text-decoration: none;
+        background:
+          radial-gradient(circle at 82% 18%, rgba(240, 136, 62, 0.32), transparent 31%),
+          radial-gradient(circle at 12% 88%, rgba(110, 163, 201, 0.3), transparent 38%),
+          linear-gradient(135deg, #16191f, #0c0d10 72%);
+      }
+      .media-facade:hover { text-decoration: none; }
+      .media-facade::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 4px);
+      }
+      .media-signal {
+        position: absolute; inset: 34px 34px auto; height: 56px;
+        display: flex; align-items: center; gap: 7px; opacity: 0.78;
+      }
+      .media-signal i { width: 5px; border-radius: 3px; background: var(--amber); }
+      .media-signal i:nth-child(1), .media-signal i:nth-child(9) { height: 16px; }
+      .media-signal i:nth-child(2), .media-signal i:nth-child(8) { height: 29px; }
+      .media-signal i:nth-child(3), .media-signal i:nth-child(7) { height: 45px; }
+      .media-signal i:nth-child(4), .media-signal i:nth-child(6) { height: 34px; }
+      .media-signal i:nth-child(5) { height: 52px; background: var(--blue-light); }
+      .media-play {
+        position: absolute; right: 34px; top: 34px; z-index: 1;
+        display: grid; place-items: center; width: 62px; height: 62px;
+        border: 1px solid rgba(255,255,255,0.3); border-radius: 50%;
+        background: rgba(12,13,16,0.72); color: #fff;
+        transition: transform 0.16s ease, background 0.16s ease;
+      }
+      .media-facade:hover .media-play { transform: scale(1.06); background: var(--amber); }
+      .media-show, .media-title, .media-meta { position: relative; z-index: 1; }
+      .media-show {
+        font-family: var(--mono); color: var(--amber); font-size: 0.78rem;
+        font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+      }
+      .media-title {
+        margin-top: 8px; max-width: 16ch; font-family: var(--display);
+        font-size: clamp(1.55rem, 3vw, 2.25rem); font-weight: 700; line-height: 1.05;
+      }
+      .media-meta { margin-top: 13px; color: #bcb7ac; font-size: 0.82rem; }
+      .media-links {
+        display: flex; justify-content: space-between; gap: 16px; padding: 14px 18px;
+        border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 0.82rem;
+      }
+      .media-links a { font-family: var(--mono); font-weight: 600; }
+      .coverage-list { display: grid; grid-template-rows: repeat(3, 1fr); gap: 12px; }
+      .coverage-card {
+        position: relative; display: flex; flex-direction: column; justify-content: center;
+        min-width: 0; padding: 21px 48px 21px 22px;
+        border: 1px solid var(--border); border-radius: var(--radius);
+        background: var(--panel); color: var(--text); text-decoration: none;
+        transition: border-color 0.18s ease, transform 0.15s ease, background 0.18s ease;
+      }
+      .coverage-card:hover {
+        border-color: var(--accent); background: var(--panel-2);
+        transform: translateY(-2px); text-decoration: none;
+      }
+      .coverage-source {
+        font-family: var(--mono); color: var(--accent); font-size: 0.7rem;
+        font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      }
+      .coverage-card strong { margin: 5px 0 4px; font-family: var(--display); font-size: 1.07rem; line-height: 1.15; }
+      .coverage-card > span:not(.coverage-source):not(.coverage-arrow) { color: var(--muted); font-size: 0.84rem; line-height: 1.42; }
+      .coverage-arrow { position: absolute; top: 20px; right: 20px; color: var(--muted); font-family: var(--mono); }
+      .community-more { margin: 26px 0 0; text-align: center; font-family: var(--mono); font-size: 0.88rem; }
+
       /* comparison */
       .table-wrap {
         overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
@@ -1236,11 +1384,17 @@ const platformGroups = [
         .hero { grid-template-columns: 1fr; gap: 36px; padding: 40px 0 56px; }
         .split { grid-template-columns: 1fr; gap: 30px; }
         .feature-grid { grid-template-columns: 1fr; }
+        .community-grid { grid-template-columns: 1fr; }
         .client-row { grid-template-columns: repeat(2, 1fr); max-width: 520px; }
         .nav-links a:nth-child(3) { display: none; }
         .gh-star span:not(.gh-count) { display: none; }
       }
       @media (max-width: 520px) {
+        .media-facade { padding: 22px; }
+        .media-signal { inset: 22px 22px auto; transform: scale(0.8); transform-origin: left top; }
+        .media-play { width: 52px; height: 52px; right: 22px; top: 22px; }
+        .media-meta { font-size: 0.73rem; }
+        .media-links { align-items: flex-start; flex-direction: column; gap: 4px; }
         .client-row { grid-template-columns: 1fr; max-width: 420px; }
         .nav-links { gap: 12px; }
         .nav-links a:not(.gh-star):not([href='/docs']) { display: none; }
