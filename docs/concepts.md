@@ -161,13 +161,21 @@ PgQue preserves the PgQ batch, tick, rotation, and consumer-tracking engine unch
 
 Lineage: PgQ (Skype, ISC, © Marko Kreen / Skype Technologies OU) → SkyTools 2/3 → `github.com/pgq/pgq` → PgQue (Apache-2.0, © 2026 Nikolay Samokhvalov). See `NOTICE` for full attribution.
 
-### Further reading
+### Further learning
 
-- Marko Kreen (Skype), [PGCon 2009 — PgQ](https://www.pgcon.org/2009/schedule/attachments/91_pgq.pdf) — the original deck on the queue engine.
-- Alexander Kukushkin (Microsoft), [Rediscovering PgQ](https://speakerdeck.com/cyberdemn/rediscovering-pgq) — a 2026 deck revisiting the PgQ architecture.
-- Christophe Pettus, [Two Snapshots and a Diff](https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/) — a walk-through of the snapshot-diff mechanism and why it avoids row locks and dead-tuple bloat.
-- [SkyTools](https://wiki.postgresql.org/wiki/SkyTools) — the Postgres toolkit Skype open-sourced, where PgQ shipped as the queuing component alongside Londiste replication.
-- [Hacker News discussion](https://news.ycombinator.com/item?id=47817349).
+Historical background:
+
+- **2007** — [SkyTools](https://wiki.postgresql.org/wiki/SkyTools), the Postgres toolkit Skype open-sourced, where PgQ shipped as the queuing component alongside Londiste replication.
+- **2009** — Marko Kreen (Skype), [PGCon — PgQ](https://www.pgcon.org/2009/schedule/attachments/91_pgq.pdf), the original deck on the queue engine.
+- **2026** — Alexander Kukushkin (Microsoft), [Rediscovering PgQ](https://speakerdeck.com/cyberdemn/rediscovering-pgq), a deck revisiting the PgQ architecture.
+
+PgQue coverage:
+
+- **2026** — Christophe Pettus, [PgQue: Two Snapshots and a Diff](https://thebuild.com/blog/2026/05/03/pgque-two-snapshots-and-a-diff/), an independent walk-through of PgQue's snapshot-diff mechanism and why it avoids row locks and dead-tuple bloat.
+- **2026** — [Postgres.fm: PgQue](https://postgres.fm/episodes/pgque) ([YouTube](https://www.youtube.com/watch?v=bBNcR14Ts4U)), with Nikolay Samokhvalov and Michael Christofides discussing PgQue's architecture, use cases, and trade-offs.
+- **2026** — [Scaling Postgres 416: Zero Bloat Postgres Queue](https://www.scalingpostgres.com/episodes/416-zero-bloat-postgres-queue/) ([YouTube](https://www.youtube.com/watch?v=ULpnamtBZFM)), with PgQue as the episode's lead story.
+- **2026** — [Postgres Weekly #645: A Kafka-like pure SQL queue for Postgres](https://postgresweekly.com/issues/645), where PgQue was the issue's headline.
+- **2026** — [Hacker News discussion](https://news.ycombinator.com/item?id=47817349).
 
 ## Where to go next
 
